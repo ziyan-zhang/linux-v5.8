@@ -2,19 +2,19 @@
  * @Author: zy nscc ubuntu22.04 1920548152@qq.com
  * @Date: 2023-06-07 02:43:13
  * @LastEditors: zy nscc ubuntu22.04 1920548152@qq.com
- * @LastEditTime: 2023-06-07 15:08:38
+ * @LastEditTime: 2023-06-07 15:26:24
  * @FilePath: /linux-v5.8/README
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
-
-调试文件系统教程：
+# 详细教程和文件位置
+调试文件系统详细版教程：
 https://www.yuque.com/zhangziyan-blrbj/lhidou/ltogdk1p90efgkki
 
-内核代码位置：~/lab/linux-v5.8
+内核代码位置：`~/lab/linux-v5.8`
 
-内核被编译到了~/lab/linux-v5.8/Linux_compiled
-
-发行版镜像位置~/lab/ubuntu.img，制作镜像（```--enable-kvm```简单启动能加，调试不能加，后面都不加了）：
+内核被编译到了：`~/lab/linux-v5.8/Linux_compiled`
+# 制作根文件系统
+发行版镜像位置~/lab/ubuntu.img，制作镜像（`--enable-kvm`简单启动能加，调试不能加，后面都不加了）：
 ```bash
 qemu-img create -q -f qcow2 ubuntu.img 10G
 sudo qemu-system-x86_64 -m 2048 -cdrom ubuntu-22.04.2-live-server-amd64.iso ubuntu.img
@@ -23,6 +23,9 @@ sudo qemu-system-x86_64 -m 2048 -cdrom ubuntu-22.04.2-live-server-amd64.iso ubun
 ```bash
 sudo qemu-system-x86_64 -m 2048 ubuntu.img
 ```
+# 编译内核并启动
+编译内核见文首教程。
+
 指定内核启动该镜像：```~/lab/linux-v5.8/run_qemu.sh```
 ```bash
 qemu-system-x86_64 \
@@ -40,10 +43,10 @@ qemu-system-x86_64 -s -S \
 	-hda ~/lab/ubuntu.img \
 	-append "root=/dev/sda2 rw console=ttyS0" \
 ```
-
+# 加磁盘设备
 下面以不调试为例，加设备。
 
-1. 额外挂载scsi disk（格式化为ext4）：
+## 1. 额外挂载scsi disk（格式化为ext4）：
 
 制作ext4:
 ```bash
@@ -77,13 +80,14 @@ cat /proc/mounts
 ```
 /dev/sdb   /mnt/scsimp ext4    defaults    0   0
 ```
-2. 额外挂载NVMe模拟磁盘（应该需要编译内核的时候打开NVMe支持）
+## 2. 额外挂载NVMe模拟磁盘
+注意编译内核的时候设备选项里面，打开NVMe支持
 
-制作模拟磁盘
+### 制作模拟的NVMe磁盘
 ```bash
 qemu-img create -f raw disk.qcow 1G
 ```
-qemu启动```run_qemu.sh```：
+qemu启动：```run_qemu.sh```：
 ```bash
 qemu-system-x86_64 \
 	-nographic -serial mon:stdio -smp 2 -m 2048 \
@@ -95,7 +99,7 @@ qemu-system-x86_64 \
     -drive file=/home/zy/lab/disk.qcow,if=none,id=nvme1 -smp 4 \
 ```
 
-格式化nvme disk
+### 对该NVMe磁盘分区
 ```bash
 sudo fdisk /dev/nvme0n1
 ```
@@ -125,12 +129,12 @@ The partition table has been altered.
 Calling ioctl() to re-read partition table.
 Syncing disks.
 ```
-此时多出一个```ls /dev```，```/dev/nvme0n1p1```设备
-格式化该分区，要先安装f2fs-tools，这时ubuntu发行版根文件系统的优势就体现出来了，直接apt上网下载。**注意要sodo，否则格式化不成功。**
+### 格式化磁盘一分区
+列一下设备```ls /dev```，此时多出一个```/dev/nvme0n1p1```。格式化该分区，要先安装f2fs-tools，这时ubuntu发行版根文件系统的优势就体现出来了，直接apt上网下载。**注意要sodo，否则格式化分区不成功。**
 ```bash
 sudo mkfs.f2fs -l nvmedisk /dev/nvme0n1p1
 ```
-为了开机后不用每次挂载sdb，在```/etc/fstab/```里面加一行`：
+同上sdb，为了开机后不用每次挂载该NVMe盘，在```/etc/fstab/```里面加一行`：
 ```
 /dev/nvme0n1p1	~/nvmemp	f2fs	defaults	0	0
 ```
