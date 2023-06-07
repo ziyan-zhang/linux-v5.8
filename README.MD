@@ -2,11 +2,13 @@
  * @Author: zy nscc ubuntu22.04 1920548152@qq.com
  * @Date: 2023-06-07 02:43:13
  * @LastEditors: zy nscc ubuntu22.04 1920548152@qq.com
- * @LastEditTime: 2023-06-07 15:26:24
+ * @LastEditTime: 2023-06-07 15:33:28
  * @FilePath: /linux-v5.8/README
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
 # 详细教程和文件位置
+比较新的版本了，有近两年顶会用的这个版本，往里加注释，调试文件系统都用这个版本了。
+
 调试文件系统详细版教程：
 https://www.yuque.com/zhangziyan-blrbj/lhidou/ltogdk1p90efgkki
 
@@ -53,7 +55,7 @@ qemu-system-x86_64 -s -S \
 dd if=/dev/zero of=ext4.img bs=1M count=256
 mkfs.ext4 ext4.img
 ```
-qemu启动```run_qemu.sh```：
+qemu启动`run_qemu.sh`：
 ```bash
 qemu-system-x86_64 \
 	-nographic -serial mon:stdio -smp 2 -m 2048 \
@@ -62,15 +64,7 @@ qemu-system-x86_64 \
 	-append "root=/dev/sda2 rw console=ttyS0" \
     -hdb ~/lab/ext4.img \
 ```
-挂载sdb：
-```bash
-sudo mount /dev/sdb /mnt/scsimp/
-```
-看一下，
-```bash
-cat /proc/mounts
-```
-发现末行多了个新挂载的文件系统：
+挂载sdb`sudo mount /dev/sdb /mnt/scsimp/`，看一下`cat /proc/mounts`，发现末行多了个新挂载的文件系统：
 ```plain
 /dev/root / ext4 rw,relatime 0 0
 ...
@@ -87,7 +81,7 @@ cat /proc/mounts
 ```bash
 qemu-img create -f raw disk.qcow 1G
 ```
-qemu启动：```run_qemu.sh```：
+qemu启动```run_qemu.sh```：
 ```bash
 qemu-system-x86_64 \
 	-nographic -serial mon:stdio -smp 2 -m 2048 \
@@ -103,6 +97,7 @@ qemu-system-x86_64 \
 ```bash
 sudo fdisk /dev/nvme0n1
 ```
+键盘输入`n, p, enter*3, w`
 ```plain
 root@lab-nscc-qemu:~# fdisk /dev/nvme0n1
 
