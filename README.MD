@@ -2,7 +2,7 @@
  * @Author: zy nscc ubuntu22.04 1920548152@qq.com
  * @Date: 2023-06-07 02:43:13
  * @LastEditors: zy nscc ubuntu22.04 1920548152@qq.com
- * @LastEditTime: 2023-06-07 13:33:59
+ * @LastEditTime: 2023-06-07 15:08:38
  * @FilePath: /linux-v5.8/README
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -14,14 +14,14 @@ https://www.yuque.com/zhangziyan-blrbj/lhidou/ltogdk1p90efgkki
 
 内核被编译到了~/lab/linux-v5.8/Linux_compiled
 
-发行版镜像位置~/lab/ubuntu.img，制作镜像：
+发行版镜像位置~/lab/ubuntu.img，制作镜像（```--enable-kvm```简单启动能加，调试不能加，后面都不加了）：
 ```bash
 qemu-img create -q -f qcow2 ubuntu.img 10G
-sudo qemu-system-x86_64 -m 2048 -cdrom ubuntu-22.04.2-live-server-amd64.iso --enable-kvm ubuntu.img
+sudo qemu-system-x86_64 -m 2048 -cdrom ubuntu-22.04.2-live-server-amd64.iso ubuntu.img
 ```
-简单启动该镜像（```--enable-kvm```简单启动能加，调试不能加，后面都不加了）：
+简单启动该镜像：
 ```bash
-sudo qemu-system-x86_64 -m 2048 --enable-kvm ubuntu.img
+sudo qemu-system-x86_64 -m 2048 ubuntu.img
 ```
 指定内核启动该镜像：```~/lab/linux-v5.8/run_qemu.sh```
 ```bash
@@ -97,7 +97,7 @@ qemu-system-x86_64 \
 
 格式化nvme disk
 ```bash
-fdisk /dev/nvme0n1
+sudo fdisk /dev/nvme0n1
 ```
 ```plain
 root@lab-nscc-qemu:~# fdisk /dev/nvme0n1
@@ -126,13 +126,14 @@ Calling ioctl() to re-read partition table.
 Syncing disks.
 ```
 此时多出一个```ls /dev```，```/dev/nvme0n1p1```设备
-格式化该分区
+格式化该分区，要先安装f2fs-tools，这时ubuntu发行版根文件系统的优势就体现出来了，直接apt上网下载。**注意要sodo，否则格式化不成功。**
 ```bash
-mkfs.f2fs -l nvmedisk /dev/nvme0n1p1
+sudo mkfs.f2fs -l nvmedisk /dev/nvme0n1p1
 ```
-
-
-
+为了开机后不用每次挂载sdb，在```/etc/fstab/```里面加一行`：
+```
+/dev/nvme0n1p1	~/nvmemp	f2fs	defaults	0	0
+```
 
 Linux kernel
 ============
