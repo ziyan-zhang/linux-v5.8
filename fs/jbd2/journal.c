@@ -17,6 +17,10 @@
  * file: that is left to a per-journal policy function, which allows us
  * to store the journal within a filesystem-specified area for ext2
  * journaling (ext2 can use a reserved inode for storing the log).
+ * 
+ * 我们实际上并没有管理这个文件中的日志的物理存储：这是留给每个日志策略函数的，
+ * 它允许我们在ext2日志记录的文件系统 指定区域中存储日志（ext2可以使用保留的inode
+ * 来存储日志）。
  */
 
 #include <linux/module.h>
@@ -143,7 +147,7 @@ static __be32 jbd2_superblock_csum(journal_t *j, journal_superblock_t *sb)
 static void commit_timeout(struct timer_list *t)
 {
 	journal_t *journal = from_timer(journal, t, j_commit_timer);
-
+	// 将该日志的当前提交线程从睡眠状态唤醒，并将其重新放回到调度队列中
 	wake_up_process(journal->j_task);
 }
 
@@ -163,6 +167,12 @@ static void commit_timeout(struct timer_list *t)
  *    of the data in that part of the log has been rewritten elsewhere on
  *    the disk.  Flushing these old buffers to reclaim space in the log is
  *    known as checkpointing, and this thread is responsible for that job.
+ * 
+ * 1）COMMIT: 每隔一段时间，我们需要将当前的文件系统状态提交到磁盘上。
+ *	日志线程负责将所有的元数据缓冲区写入磁盘。如果正在进行快速提交，则日志线程等待，直到完成，然后继续。
+ * 
+ * 2）CHECKPOINT: 在可以重用日志文件的已使用部分之前，必须将该日志部分中的所有数据重写到磁盘上的其他位置。
+ * 	将这些旧缓冲区刷新以在日志中回收空间称为检查点，该线程负责该作业。
  */
 
 static int kjournald2(void *arg)
@@ -173,6 +183,7 @@ static int kjournald2(void *arg)
 	/*
 	 * Set up an interval timer which can be used to trigger a commit wakeup
 	 * after the commit interval expires
+	 * 设置可用于在提交间隔过期后触发提交唤醒的间隔计时器
 	 */
 	timer_setup(&journal->j_commit_timer, commit_timeout, 0);
 
@@ -180,43 +191,53 @@ static int kjournald2(void *arg)
 
 	/* Record that the journal thread is running */
 	journal->j_task = current;
-	wake_up(&journal->j_wait_done_commit);
+	wake_up(&journal->j_wait_done_commit);	// 唤醒journal的等待提交完成的等待队列
 
 	/*
 	 * Make sure that no allocations from this kernel thread will ever
 	 * recurse to the fs layer because we are responsible for the
 	 * transaction commit and any fs involvement might get stuck waiting for
 	 * the trasn. commit.
+	 * 
+	 * 确保此内核线程的任何分配都不会递归到fs层，因为我们负责事务提交，
+	 * 任何fs参与都可能会被卡在等待事务提交上
 	 */
 	memalloc_nofs_save();
 
 	/*
 	 * And now, wait forever for commit wakeup events.
+	 * 现在，永远等待提交唤醒事件。
 	 */
 	write_lock(&journal->j_state_lock);
 
 loop:
-	if (journal->j_flags & JBD2_UNMOUNT)
+	if (journal->j_flags & JBD2_UNMOUNT)	// JBD2_UNMOUNT，日志线程正在被破坏
 		goto end_loop;
 
+	// j_commit_sequence，最近提交的事务的序列号
+	// j_commit_request，最近请求提交的事务的序列号
 	jbd2_debug(1, "commit_sequence=%u, commit_request=%u\n",
 		journal->j_commit_sequence, journal->j_commit_request);
 
 	if (journal->j_commit_sequence != journal->j_commit_request) {
 		jbd2_debug(1, "OK, requests differ\n");
 		write_unlock(&journal->j_state_lock);
+		// 删除用于唤醒提交进程的定时器，并阻止其回调函数的执行
 		del_timer_sync(&journal->j_commit_timer);
-		jbd2_journal_commit_transaction(journal);
+		jbd2_journal_commit_transaction(journal);	// 提交该事物并刷新更改到磁盘中
 		write_lock(&journal->j_state_lock);
 		goto loop;
 	}
 
-	wake_up(&journal->j_wait_done_commit);
+	wake_up(&journal->j_wait_done_commit);	// 唤醒journal的等待提交完成的等待队列
 	if (freezing(current)) {
 		/*
 		 * The simpler the better. Flushing journal isn't a
 		 * good idea, because that depends on threads that may
 		 * be already stopped.
+		 * 
+		 * 简单就是好。刷新日志不是一个好主意，因为这取决于可能已经停止的线程。
+		 * TODO: 这是什么意思，什么停止？
 		 */
 		jbd2_debug(1, "Now suspending kjournald2\n");
 		write_unlock(&journal->j_state_lock);
@@ -226,6 +247,8 @@ loop:
 		/*
 		 * We assume on resume that commits are already there,
 		 * so we don't sleep
+		 * 我们在恢复时假设提交已经存在，因此我们不会睡觉
+		 * TODO: 这是什么意思，什么恢复？
 		 */
 		DEFINE_WAIT(wait);
 		int should_sleep = 1;
@@ -273,11 +296,13 @@ static int jbd2_journal_start_thread(journal_t *journal)
 {
 	struct task_struct *t;
 
+	// kthread_run用于创建内核线程
 	t = kthread_run(kjournald2, journal, "jbd2/%s",
 			journal->j_devname);
 	if (IS_ERR(t))
 		return PTR_ERR(t);
 
+	// wait_event，让一个进程等待一个条件的发生，直到条件满足时，唤醒等待进程
 	wait_event(journal->j_wait_done_commit, journal->j_task != NULL);
 	return 0;
 }
@@ -289,7 +314,7 @@ static void journal_kill_thread(journal_t *journal)
 
 	while (journal->j_task) {
 		write_unlock(&journal->j_state_lock);
-		wake_up(&journal->j_wait_commit);
+		wake_up(&journal->j_wait_commit);	// 触发提交的等待队列，TODO: WAHT?
 		wait_event(journal->j_wait_done_commit, journal->j_task == NULL);
 		write_lock(&journal->j_state_lock);
 	}
@@ -302,6 +327,10 @@ static void journal_kill_thread(journal_t *journal)
  * Writes a metadata buffer to a given disk block.  The actual IO is not
  * performed but a new buffer_head is constructed which labels the data
  * to be written with the correct destination disk block.
+ * 
+ * jbd2_journal_write_metadate_buffer: 将元数据缓冲区写入日志，返回用于IO的buffer_head指针
+ * 将元数据缓冲区写入给定的磁盘块。实际的IO不会执行，但是会构造一个新的buffer_head，
+ * 该buffer_head使用正确的目标磁盘块标记要写入的数据。
  *
  * Any magic-number escaping which needs to be done will cause a
  * copy-out here.  If the buffer happens to start with the
@@ -312,12 +341,23 @@ static void journal_kill_thread(journal_t *journal)
  * marked as an escaped buffer in the corresponding log descriptor
  * block.  The missing word can then be restored when the block is read
  * during recovery.
+ * 
+ * 任何需要完成的魔数转义都会导致这里的复制。如果缓冲区恰好以JBD2_MAGIC_NUMBER开头，
+ * 那么我们不能直接将其写入日志：魔数只写入日志以用于描述符块。在这种情况下，
+ * 我们复制数据并将第一个字替换为0，并返回一个结果代码，该代码指示该缓冲区需要在
+ * 相应的日志描述符块中标记为转义缓冲区。在恢复期间读取块时，可以恢复丢失的字。
+ * 注：魔数必表示描述符块，所以缓冲区不能以魔数开头--以0开头，应用的时候一看零开头，直接替换成魔数的第一个字
+ * 与0开头的缓冲区的区别：0开头的缓冲区，没有转义标志
  *
  * If the source buffer has already been modified by a new transaction
  * since we took the last commit snapshot, we use the frozen copy of
  * that data for IO. If we end up using the existing buffer_head's data
  * for the write, then we have to make sure nobody modifies it while the
  * IO is in progress. do_get_write_access() handles this.
+ * 
+ * 如果自从我们拍摄最后一次提交快照以来，源缓冲区已被新事务修改，则我们使用该数据的冻结副本进行IO。
+ * 如果我们最终使用现有的buffer_head的数据进行写入，那么我们必须确保在IO正在进行时没有人修改它。
+ * do_get_write_access()处理此问题。
  *
  * The function returns a pointer to the buffer_head to be used for IO.
  *
@@ -367,6 +407,7 @@ repeat:
 	/*
 	 * If a new transaction has already done a buffer copy-out, then
 	 * we use that version of the data for the commit.
+	 * 如果新事务已经执行了缓冲区复制，则我们使用该数据版本进行提交。
 	 */
 	if (jh_in->b_frozen_data) {
 		done_copy_out = 1;
@@ -377,7 +418,7 @@ repeat:
 		new_offset = offset_in_page(jh2bh(jh_in)->b_data);
 	}
 
-	mapped_data = kmap_atomic(new_page);
+	mapped_data = kmap_atomic(new_page);	// 在不持有锁的情况下访问内核核心页表的函数之一
 	/*
 	 * Fire data frozen trigger if data already wasn't frozen.  Do this
 	 * before checking for escaping, as the trigger may modify the magic
@@ -476,11 +517,12 @@ repeat:
 /*
  * Called with j_state_lock locked for writing.
  * Returns true if a transaction commit was started.
+ * 调用时锁定 j_state_lock 以进行写入。如果事务提交已开始，则返回true。
  */
 static int __jbd2_log_start_commit(journal_t *journal, tid_t target)
 {
 	/* Return if the txn has already requested to be committed */
-	if (journal->j_commit_request == target)
+	if (journal->j_commit_request == target)	// j_commit_request：最近请求提交的事务的tid
 		return 0;
 
 	/*
@@ -505,7 +547,9 @@ static int __jbd2_log_start_commit(journal_t *journal, tid_t target)
 	} else if (!tid_geq(journal->j_commit_request, target))
 		/* This should never happen, but if it does, preserve
 		   the evidence before kjournald goes into a loop and
-		   increments j_commit_sequence beyond all recognition. */
+		   increments j_commit_sequence beyond all recognition. 
+		   
+		   不该发生的地方记录下证据  */
 		WARN_ONCE(1, "JBD2: bad log_start_commit: %u %u %u %u\n",
 			  journal->j_commit_request,
 			  journal->j_commit_sequence,
@@ -514,6 +558,7 @@ static int __jbd2_log_start_commit(journal_t *journal, tid_t target)
 	return 0;
 }
 
+// __jbd2_log_start_commit 的包装函数，用于并发安全，从命名上也能看出
 int jbd2_log_start_commit(journal_t *journal, tid_t tid)
 {
 	int ret;
@@ -551,25 +596,29 @@ static int __jbd2_journal_force_commit(journal_t *journal)
 		return 0;
 	}
 	tid = transaction->t_tid;
-	read_unlock(&journal->j_state_lock);
+	read_unlock(&journal->j_state_lock);	// 这里释放读锁，下面的函数需要写锁
 	if (need_to_start)
-		jbd2_log_start_commit(journal, tid);
+		jbd2_log_start_commit(journal, tid);	// 这个应该是立即返回的
 	ret = jbd2_log_wait_commit(journal, tid);
 	if (!ret)
-		ret = 1;
+		ret = 1;	// 说明已经提交了
 
 	return ret;
 }
 
 /**
  * jbd2_journal_force_commit_nested - Force and wait upon a commit if the
- * calling process is not within transaction.
+ * calling process is not within transaction. 
  *
  * @journal: journal to force
  * Returns true if progress was made.
  *
  * This is used for forcing out undo-protected data which contains
  * bitmaps, when the fs is running out of space.
+ * 
+ * 如果调用进程不在事务内，强制并等待提交。
+ * 如果取得进展则返回真。
+ * 这用于在fs空间不足时强制输出包含位图的、受撤销保护的数据。
  */
 int jbd2_journal_force_commit_nested(journal_t *journal)
 {
@@ -585,6 +634,8 @@ int jbd2_journal_force_commit_nested(journal_t *journal)
  *
  * Caller want unconditional commit. We can only force the running transaction
  * if we don't have an active handle, otherwise, we will deadlock.
+ * 
+ * 调用者想要无条件提交。只有在没有活动句柄的情况下才能 force running 事务，否则会死锁。
  */
 int jbd2_journal_force_commit(journal_t *journal)
 {
@@ -601,6 +652,8 @@ int jbd2_journal_force_commit(journal_t *journal)
  * Start a commit of the current running transaction (if any).  Returns true
  * if a transaction is going to be committed (or is currently already
  * committing), and fills its tid in at *ptid
+ * 
+ * 开始提交当前正在运行的事务（如果有）。如果事务将被提交（或当前已经提交），则返回true，并在*ptid中填充其tid
  */
 int jbd2_journal_start_commit(journal_t *journal, tid_t *ptid)
 {
@@ -634,6 +687,9 @@ int jbd2_journal_start_commit(journal_t *journal, tid_t *ptid)
  * connected with a transaction commit. If 0 is returned, transaction
  * may or may not have sent the barrier. Used to avoid sending barrier
  * twice in common cases.
+ * 
+ * 如果给定的事务尚未发送与事务提交相关的屏障请求，则返回1。
+ * 如果返回0，则事务可能已经发送了屏障，也可能没有发送。用于避免在常见情况下发送两次屏障。
  */
 int jbd2_trans_will_send_data_barrier(journal_t *journal, tid_t tid)
 {
@@ -673,6 +729,9 @@ EXPORT_SYMBOL(jbd2_trans_will_send_data_barrier);
 /*
  * Wait for a specified commit to complete.
  * The caller may not hold the journal lock.
+ * 
+ * 等待指定的提交完成。调用者可能不持有日志锁。
+ * TODO: 那写锁是什么时候拿的和释放的呢，为了commit的话？
  */
 int jbd2_log_wait_commit(journal_t *journal, tid_t tid)
 {
@@ -705,8 +764,11 @@ int jbd2_log_wait_commit(journal_t *journal, tid_t tid)
 				  tid, journal->j_commit_sequence);
 		read_unlock(&journal->j_state_lock);
 		wake_up(&journal->j_wait_commit);
+		// 将当前进程或线程添加到 j_wait_done_commit 等待队列中，同时将该进程的状态修改为等待状态
+		// 每次等待队列被唤醒时，都会检查 tid 是否小于等于 j_commit_sequence，
+		// 如果是，则表示当前进程或线程可以继续执行，否则继续等待。
 		wait_event(journal->j_wait_done_commit,
-				!tid_gt(tid, journal->j_commit_sequence));
+				!tid_gt(tid, journal->j_commit_sequence));	// TODO: 为什么这里前面有个感叹号？
 		read_lock(&journal->j_state_lock);
 	}
 	read_unlock(&journal->j_state_lock);
@@ -722,6 +784,10 @@ int jbd2_log_wait_commit(journal_t *journal, tid_t tid)
  * if a fast commit is not needed, either because there's an already a commit
  * going on or this tid has already been committed. Returns -EINVAL if no jbd2
  * commit has yet been performed.
+ * 
+ * 开始快速提交。如果有正在进行的快速或完整提交，请等待其完成。如果启动了新的快速提交，则返回0。
+ * 如果不需要快速提交，则返回-EALREADY，因为已经有一个提交正在进行，或者此tid已经提交。
+ * 如果尚未执行jbd2提交，则返回-EINVAL。
  */
 int jbd2_fc_begin_commit(journal_t *journal, tid_t tid)
 {
@@ -730,16 +796,19 @@ int jbd2_fc_begin_commit(journal_t *journal, tid_t tid)
 	/*
 	 * Fast commits only allowed if at least one full commit has
 	 * been processed.
+	 * 仅当至少处理了一个完整提交时才允许快速提交。
 	 */
-	if (!journal->j_stats.ts_tid)
+	if (!journal->j_stats.ts_tid)	// 尚未进行过提交
 		return -EINVAL;
 
 	write_lock(&journal->j_state_lock);
+	// transaction id <= journal commit_sequence，此tid已提交
 	if (tid <= journal->j_commit_sequence) {
 		write_unlock(&journal->j_state_lock);
 		return -EALREADY;
 	}
 
+	// 已经有提交（全提交或快速提交）在进行
 	if (journal->j_flags & JBD2_FULL_COMMIT_ONGOING ||
 	    (journal->j_flags & JBD2_FAST_COMMIT_ONGOING)) {
 		DEFINE_WAIT(wait);
@@ -762,6 +831,7 @@ EXPORT_SYMBOL(jbd2_fc_begin_commit);
 /*
  * Stop a fast commit. If fallback is set, this function starts commit of
  * TID tid before any other fast commit can start.
+ * 停止一个快速提交。如果设置了fallback，则此函数在任何其他快速提交开始之前开始提交TID tid。
  */
 static int __jbd2_fc_end_commit(journal_t *journal, tid_t tid, bool fallback)
 {
@@ -820,6 +890,9 @@ EXPORT_SYMBOL(jbd2_transaction_committed);
  * committing that transaction before waiting for it to complete.  If
  * the transaction id is stale, it is by definition already completed,
  * so just return SUCCESS.
+ * 
+ * 此函数返回时，与tid对应的事务将完成。如果事务当前正在运行，请在等待其完成之前开始提交该事务。
+ * 如果事务ID已过时，则根据定义已经完成，因此只需返回SUCCESS。
  */
 int jbd2_complete_transaction(journal_t *journal, tid_t tid)
 {
@@ -849,6 +922,7 @@ EXPORT_SYMBOL(jbd2_complete_transaction);
  * Log buffer allocation routines:
  */
 
+// 返回日志的下一个物理块号？
 int jbd2_journal_next_log_block(journal_t *journal, unsigned long long *retp)
 {
 	unsigned long blocknr;
@@ -865,7 +939,8 @@ int jbd2_journal_next_log_block(journal_t *journal, unsigned long long *retp)
 	return jbd2_journal_bmap(journal, blocknr, retp);
 }
 
-/* Map one fast commit buffer for use by the file system */
+/* Map one fast commit buffer for use by the file system
+映射一个快速提交buffer给文件系统使用 */
 int jbd2_fc_get_buf(journal_t *journal, struct buffer_head **bh_out)
 {
 	unsigned long long pblock;
@@ -879,7 +954,7 @@ int jbd2_fc_get_buf(journal_t *journal, struct buffer_head **bh_out)
 	if (journal->j_fc_off + journal->j_fc_first < journal->j_fc_last) {
 		fc_off = journal->j_fc_off;
 		blocknr = journal->j_fc_first + fc_off;
-		journal->j_fc_off++;
+		journal->j_fc_off++;	// 当前已分配的快速提交块数加一
 	} else {
 		ret = -EINVAL;
 	}
@@ -891,6 +966,8 @@ int jbd2_fc_get_buf(journal_t *journal, struct buffer_head **bh_out)
 	if (ret)
 		return ret;
 
+	// __getblk()用于从块设备上读取一个块，若该块已经在缓冲区中，则返回该块的缓冲区头指针，否则分配一个新的缓冲区。
+	// 三个参数：设备号、块号、块大小
 	bh = __getblk(journal->j_dev, pblock, journal->j_blocksize);
 	if (!bh)
 		return -ENOMEM;
@@ -907,6 +984,7 @@ EXPORT_SYMBOL(jbd2_fc_get_buf);
 /*
  * Wait on fast commit buffers that were allocated by jbd2_fc_get_buf
  * for completion.
+ * 等待由 jbd2_fc_get_buf 分配的快速提交缓冲区完成。
  */
 int jbd2_fc_wait_bufs(journal_t *journal, int num_blks)
 {
@@ -921,7 +999,7 @@ int jbd2_fc_wait_bufs(journal_t *journal, int num_blks)
 	 */
 	for (i = j_fc_off - 1; i >= j_fc_off - num_blks; i--) {
 		bh = journal->j_fc_wbuf[i];
-		wait_on_buffer(bh);
+		wait_on_buffer(bh);		// 等待buffer被释放。TODO: buffer释放是jbd2_release_bufs做的吗，怎么联动的？
 		/*
 		 * Update j_fc_off so jbd2_fc_release_bufs can release remain
 		 * buffer head.
@@ -963,6 +1041,10 @@ EXPORT_SYMBOL(jbd2_fc_release_bufs);
  * On external journals the journal blocks are identity-mapped, so
  * this is a no-op.  If needed, we can use j_blk_offset - everything is
  * ready.
+ * 
+ * journal中的逻辑块号转换为物理块号
+ * 在外部日志中，日志块是identity-mapped，所以这里不需要转换
+ * 如果需要，我们可以使用j_blk_offset - 一切都准备好了
  */
 int jbd2_journal_bmap(journal_t *journal, unsigned long blocknr,
 		 unsigned long long *retp)
@@ -976,7 +1058,7 @@ int jbd2_journal_bmap(journal_t *journal, unsigned long blocknr,
 		if (err == 0)
 			*retp = block;
 	} else if (journal->j_inode) {
-		ret = bmap(journal->j_inode, &block);
+		ret = bmap(journal->j_inode, &block);	// 将文件中的逻辑块号转换为物理块号
 
 		if (ret || !block) {
 			printk(KERN_ALERT "%s: journal block not found "
@@ -1003,7 +1085,16 @@ int jbd2_journal_bmap(journal_t *journal, unsigned long blocknr,
  * the buffer's contents they really should run flush_dcache_page(bh->b_page).
  * But we don't bother doing that, so there will be coherency problems with
  * mmaps of blockdevs which hold live JBD-controlled filesystems.
+ * 
+ * 我们玩buffer_head别名技巧，将数据/元数据块写入日志，而不复制其内容，
+ * 但是对于日志描述符块，我们确实需要生成合法的缓冲区。
+ * 
+ * 在调用jbd2_journal_get_descriptor_buffer()的调用者完成修改缓冲区内容后，
+ * 他们确实应该运行flush_dcache_page(bh->b_page)。
+ * 但是我们不费心做这个，所以在持有活动JBD控制的文件系统的块设备的mmap中将会有一致性问题。
  */
+
+// 获得该transaction的一个描述符 buffer head
 struct buffer_head *
 jbd2_journal_get_descriptor_buffer(transaction_t *transaction, int type)
 {
@@ -1058,6 +1149,10 @@ void jbd2_descriptor_block_csum_set(journal_t *j, struct buffer_head *bh)
  *
  * The return value is 0 if journal tail cannot be pushed any further, 1 if
  * it can.
+ * 
+ * 返回日志中最旧事务的tid和事务开始的日志块。
+ * 如果日志现在是空的，返回下一个我们将写入的事务ID以及该事务将从哪里开始。
+ * 如果日志尾部不能再推进，返回值为0，如果可以，返回值为1。
  */
 int jbd2_journal_get_log_tail(journal_t *journal, tid_t *tid,
 			      unsigned long *block)
@@ -1079,7 +1174,7 @@ int jbd2_journal_get_log_tail(journal_t *journal, tid_t *tid,
 		*block = journal->j_head;
 	} else {
 		*tid = journal->j_transaction_sequence;
-		*block = journal->j_head;
+		*block = journal->j_head;	// 日志头：标识日志中第一个未使用的块
 	}
 	ret = tid_gt(*tid, journal->j_tail_sequence);
 	spin_unlock(&journal->j_list_lock);
@@ -1095,6 +1190,10 @@ int jbd2_journal_get_log_tail(journal_t *journal, tid_t *tid,
  * sure provided log tail information is valid (e.g. by holding
  * j_checkpoint_mutex all the time between computing log tail and calling this
  * function as is the case with jbd2_cleanup_journal_tail()).
+ * 
+ * 更新日志结构的信息和磁盘上的日志超级块中关于日志尾部的信息。
+ * 该函数不检查传入的信息是否真的将日志尾部推进。调用者有责任确保提供的日志尾部信息是有效的
+ * （例如，通过在计算日志尾部和调用该函数之间始终持有j_checkpoint_mutex来清理日志尾部的情况）。
  *
  * Requires j_checkpoint_mutex
  */
@@ -1110,6 +1209,12 @@ int __jbd2_update_log_tail(journal_t *journal, tid_t tid, unsigned long block)
 	 * soon as we update j_tail, next transaction can start reusing journal
 	 * space and if we lose sb update during power failure we'd replay
 	 * old transaction with possibly newly overwritten data.
+	 * 
+	 * 我们不能让写入保留在驱动器的缓存中，因为一旦我们更新j_tail，下一个事务就可以开始重用日志空间，
+	 * 如果我们在断电时丢失sb更新，我们可能会使用新覆盖的数据重放旧事务
+	 * 
+	 * tid: 更新后日志尾部的事务ID
+	 * block: 更新后日志尾部的块号
 	 */
 	ret = jbd2_journal_update_sb_log_tail(journal, tid, block,
 					      REQ_SYNC | REQ_FUA);
@@ -1140,10 +1245,14 @@ out:
  * This is a variation of __jbd2_update_log_tail which checks for validity of
  * provided log tail and locks j_checkpoint_mutex. So it is safe against races
  * with other threads updating log tail.
+ * 
+ * 这是__jbd2_update_log_tail的一个变体，它检查提供的日志尾部的有效性并锁定j_checkpoint_mutex。
+ * 因此，它可以防止与其他线程更新日志尾部的竞争。
+ * TODO: 更新日志尾部的竞争是瓶颈吗？
  */
 void jbd2_update_log_tail(journal_t *journal, tid_t tid, unsigned long block)
 {
-	mutex_lock_io(&journal->j_checkpoint_mutex);
+	mutex_lock_io(&journal->j_checkpoint_mutex);	// TODO: checkpoint_mutex只在这处使用吗？
 	if (tid_gt(tid, journal->j_tail_sequence))
 		__jbd2_update_log_tail(journal, tid, block);
 	mutex_unlock(&journal->j_checkpoint_mutex);
@@ -1265,10 +1374,13 @@ static const struct proc_ops jbd2_info_proc_ops = {
 
 static struct proc_dir_entry *proc_jbd2_stats;
 
+// 为jbd创建/proc目录下的文件和节点
 static void jbd2_stats_proc_init(journal_t *journal)
 {
+	// j_proc_entry：jbd统计目录的fs条目
 	journal->j_proc_entry = proc_mkdir(journal->j_devname, proc_jbd2_stats);
 	if (journal->j_proc_entry) {
+		// 在proc下创建节点
 		proc_create_data("info", S_IRUGO, journal->j_proc_entry,
 				 &jbd2_info_proc_ops, journal);
 	}
@@ -1297,6 +1409,8 @@ static int jbd2_min_tag_size(void)
  *
  * Scan the checkpointed buffer on the checkpoint list and release the
  * journal_head.
+ * 
+ * 扫描checkpoint list上的checkpointed buffer并释放journal_head
  */
 static unsigned long jbd2_journal_shrink_scan(struct shrinker *shrink,
 					      struct shrink_control *sc)
@@ -1323,6 +1437,8 @@ static unsigned long jbd2_journal_shrink_scan(struct shrinker *shrink,
  * @sc: reclaim request to process
  *
  * Count the number of checkpoint buffers on the checkpoint list.
+ * 
+ * 统计checkpoint list上的checkpoint buffer的数量
  */
 static unsigned long jbd2_journal_shrink_count(struct shrinker *shrink,
 					       struct shrink_control *sc)
@@ -1339,11 +1455,18 @@ static unsigned long jbd2_journal_shrink_count(struct shrinker *shrink,
 /*
  * Management for journal control blocks: functions to create and
  * destroy journal_t structures, and to initialise and read existing
- * journal blocks from disk.  */
+ * journal blocks from disk.  
+ * 
+ * journal control blocks的管理：创建和销毁journal_t结构的函数，
+ * 以及初始化和从磁盘读取现有journal块的函数。*/
 
-/* First: create and setup a journal_t object in memory.  We initialise
+/* 
+ * First: create and setup a journal_t object in memory.  We initialise
  * very few fields yet: that has to wait until we have created the
- * journal structures from from scratch, or loaded them from disk. */
+ * journal structures from from scratch, or loaded them from disk.
+ * 
+ * 首先：在内存中创建和设置journal_t对象。我们只初始化了很少的字段：
+ * 这必须等到我们从头开始创建journal结构或从磁盘加载它们。 */
 
 static journal_t *journal_init_common(struct block_device *bdev,
 			struct block_device *fs_dev,
@@ -1355,6 +1478,8 @@ static journal_t *journal_init_common(struct block_device *bdev,
 	struct buffer_head *bh;
 	int n;
 
+	// kzalloc是内核中用于分配内存的函数，会分配指定大小的内核堆内存，并返回指向该内存块的指针
+	// GFP_KERNEL是内核内存分配时最常用的，无内存可用时可引起休眠
 	journal = kzalloc(sizeof(*journal), GFP_KERNEL);
 	if (!journal)
 		return NULL;
@@ -1445,9 +1570,12 @@ err_cleanup:
  * need to set up all of the mapping information to tell the journaling
  * system where the journal blocks are.
  *
+ * 创建一个journal结构，分配一些固定的磁盘块给journal。我们不会真正的去操作这些磁盘块，
+ * 但是我们需要设置所有的映射信息，告诉journaling系统journal块在哪里。
  */
 
 /**
+ * 创建和初始化一个journal结构：journal内存结构和proc目录下的相应文件的创建
  *  journal_t * jbd2_journal_init_dev() - creates and initialises a journal structure
  *  @bdev: Block device on which to create the journal
  *  @fs_dev: Device which hold journalled filesystem for this journal.
@@ -1459,7 +1587,7 @@ err_cleanup:
  *
  *  jbd2_journal_init_dev creates a journal which maps a fixed contiguous
  *  range of blocks on an arbitrary block device.
- *
+ * 	jbd2_journal_init_dev创建一个journal，它映射一个任意块设备上的一个固定连续的块范围。
  */
 journal_t *jbd2_journal_init_dev(struct block_device *bdev,
 			struct block_device *fs_dev,
@@ -1486,6 +1614,8 @@ journal_t *jbd2_journal_init_dev(struct block_device *bdev,
  * jbd2_journal_init_inode creates a journal which maps an on-disk inode as
  * the journal.  The inode must exist already, must support bmap() and
  * must have all data blocks preallocated.
+ * 
+ * 创建一个映射到inode上的journal
  */
 journal_t *jbd2_journal_init_inode(struct inode *inode)
 {
@@ -1495,7 +1625,7 @@ journal_t *jbd2_journal_init_inode(struct inode *inode)
 	int err = 0;
 
 	blocknr = 0;
-	err = bmap(inode, &blocknr);
+	err = bmap(inode, &blocknr);	// 返回inode的第一个block的blocknr
 
 	if (err || !blocknr) {
 		pr_err("%s: Cannot locate journal superblock\n",
@@ -1540,6 +1670,9 @@ static void journal_fail_superblock(journal_t *journal)
  * startup of a new journaling session.  We use this both when creating
  * a journal, and after recovering an old journal to reset it for
  * subsequent use.
+ * 
+ * 给定一个journal_t结构，初始化各种字段，用于启动一个新的journaling会话。
+ * 
  */
 
 static int journal_reset(journal_t *journal)
@@ -1596,11 +1729,15 @@ static int journal_reset(journal_t *journal)
 		 * transaction will start reusing journal space and so we
 		 * must make sure information about current log tail is on
 		 * disk before that.
+		 * 
+		 * 更新日志尾信息。我们使用REQ_FUA，因为新的事务将开始重用日志空间，
+		 * 因此我们必须确保当前日志尾的信息在此之前在磁盘上。
 		 */
 		jbd2_journal_update_sb_log_tail(journal,
 						journal->j_tail_sequence,
 						journal->j_tail,
 						REQ_SYNC | REQ_FUA);
+						// REQ_FUA是bio的request flag，表示数据安全写到非易失性存储再返回
 		mutex_unlock(&journal->j_checkpoint_mutex);
 	}
 	return jbd2_journal_start_thread(journal);
@@ -1609,6 +1746,7 @@ static int journal_reset(journal_t *journal)
 /*
  * This function expects that the caller will have locked the journal
  * buffer head, and will return with it unlocked
+ * 该函数期望调用者已经锁定了日志缓冲头、并且返回时没有锁定
  */
 static int jbd2_write_superblock(journal_t *journal, blk_opf_t write_flags)
 {
@@ -1645,7 +1783,7 @@ static int jbd2_write_superblock(journal_t *journal, blk_opf_t write_flags)
 	get_bh(bh);
 	bh->b_end_io = end_buffer_write_sync;
 	submit_bh(REQ_OP_WRITE | write_flags, bh);
-	wait_on_buffer(bh);
+	wait_on_buffer(bh);		// 等待缓冲区IO操作完成：使进程进入睡眠状态，并且会在IO操作完成之前一直等待。
 	if (buffer_write_io_error(bh)) {
 		clear_buffer_write_io_error(bh);
 		set_buffer_uptodate(bh);
@@ -1670,6 +1808,8 @@ static int jbd2_write_superblock(journal_t *journal, blk_opf_t write_flags)
  *
  * Update a journal's superblock information about log tail and write it to
  * disk, waiting for the IO to complete.
+ * 
+ * 更新日志尾信息，并将其写入磁盘，等待IO完成。传给该函数的是现成的要被更新成为的信息。
  */
 int jbd2_journal_update_sb_log_tail(journal_t *journal, tid_t tail_tid,
 				    unsigned long tail_block,
@@ -1714,6 +1854,8 @@ out:
  *
  * Update a journal's dynamic superblock fields to show that journal is empty.
  * Write updated superblock to disk waiting for IO to complete.
+ * 
+ * 标记日志为空。更新日志的动态超级块字段，以显示日志为空。将更新后的超级块写入磁盘，等待IO完成。
  */
 static void jbd2_mark_journal_empty(journal_t *journal, blk_opf_t write_flags)
 {
@@ -1730,8 +1872,11 @@ static void jbd2_mark_journal_empty(journal_t *journal, blk_opf_t write_flags)
 	jbd2_debug(1, "JBD2: Marking journal as empty (seq %u)\n",
 		  journal->j_tail_sequence);
 
+	// 日志中第一个预期提交ID = 日志中最旧事务的序列号
 	sb->s_sequence = cpu_to_be32(journal->j_tail_sequence);
+	// 日志的开始块号 = 0
 	sb->s_start    = cpu_to_be32(0);
+	// TODO: 为啥这俩一这样设置，就相当于标记了日志为空呢？
 	if (jbd2_has_feature_fast_commit(journal)) {
 		/*
 		 * When journal is clean, no need to commit fast commit flag and
@@ -1763,6 +1908,13 @@ static void jbd2_mark_journal_empty(journal_t *journal, blk_opf_t write_flags)
  * Note: JBD2_JOURNAL_FLUSH_ZEROOUT attempts to use hardware offload. Zeroes
  * will be explicitly written if no hardware offload is available, see
  * blkdev_issue_zeroout for more details.
+ * 
+ * 丢弃或清空日志块（不包括超级块）。
+ * 对日志的每个物理连续区域都发送一个丢弃/清空请求。必须设置JBD2_JOURNAL_FLUSH_DISCARD
+ * 或JBD2_JOURNAL_FLUSH_ZEROOUT中的一个，以确定要执行的操作。
+ * 
+ * 注意：JBD2_JOURNAL_FLUSH_ZEROOUT尝试使用硬件卸载。如果没有硬件卸载，则将显式写入零，
+ * 有关详细信息，请参见blkdev_issue_zeroout。
  */
 static int __jbd2_journal_erase(journal_t *journal, unsigned int flags)
 {
@@ -1784,11 +1936,13 @@ static int __jbd2_journal_erase(journal_t *journal, unsigned int flags)
 	/*
 	 * lookup block mapping and issue discard/zeroout for each
 	 * contiguous region
+	 * 查找块映射，并为每个连续区域发出丢弃/清空
 	 */
+	// log_offset = 日志信息的第一个块号
 	log_offset = be32_to_cpu(journal->j_superblock->s_first);
 	block_start =  ~0ULL;
 	for (block = log_offset; block < journal->j_total_len; block++) {
-		err = jbd2_journal_bmap(journal, block, &phys_block);
+		err = jbd2_journal_bmap(journal, block, &phys_block);	// 日志中逻辑块号转化为物理块号
 		if (err) {
 			pr_err("JBD2: bad block at offset %lu", block);
 			return err;
@@ -1803,6 +1957,7 @@ static int __jbd2_journal_erase(journal_t *journal, unsigned int flags)
 		 * last block not contiguous with current block,
 		 * process last contiguous region and return to this block on
 		 * next loop
+		 * 最后一个块与当前块不连续，处理最后一个连续区域，并在下一个循环中返回到此块
 		 */
 		if (phys_block != block_stop + 1) {
 			block--;
@@ -1820,6 +1975,7 @@ static int __jbd2_journal_erase(journal_t *journal, unsigned int flags)
 		/*
 		 * end of contiguous region or this is last block of journal,
 		 * take care of the region
+		 * 连续区域的末尾或这是日志的最后一个块，注意该区域
 		 */
 		byte_start = block_start * journal->j_blocksize;
 		byte_stop = block_stop * journal->j_blocksize;
@@ -1860,6 +2016,9 @@ static int __jbd2_journal_erase(journal_t *journal, unsigned int flags)
  *
  * Update a journal's errno.  Write updated superblock to disk waiting for IO
  * to complete.
+ * 
+ * 更新日志中的错误。
+ * 更新日志的errno。写入更新的超级块到磁盘，等待IO完成。
  */
 void jbd2_journal_update_sb_errno(journal_t *journal)
 {
@@ -1895,6 +2054,7 @@ static int journal_revoke_records_per_block(journal_t *journal)
 /*
  * Read the superblock for a given journal, performing initial
  * validation of the format.
+ * 读取给定日志的超级块，对格式进行初始验证。
  */
 static int journal_get_superblock(journal_t *journal)
 {
@@ -2011,6 +2171,7 @@ out:
 /*
  * Load the on-disk journal superblock and read the key fields into the
  * journal_t.
+ * 读取磁盘上的日志超级块，并将关键字段读入journal_t。
  */
 
 static int load_superblock(journal_t *journal)
@@ -2051,6 +2212,9 @@ static int load_superblock(journal_t *journal)
  * Given a journal_t structure which tells us which disk blocks contain
  * a journal, read the journal from disk to initialise the in-memory
  * structures.
+ * 
+ * 从磁盘上读取journal
+ * 给定一个journal_t结构，告诉我们哪些磁盘块包含日志，从磁盘读取日志以初始化内存结构。
  */
 int jbd2_journal_load(journal_t *journal)
 {

@@ -73,6 +73,9 @@ struct journal_head {
 	 * [j_list_lock] [b_state_lock]
 	 * Either of these locks is enough for reading, both are needed for
 	 * changes.
+	 * 
+	 * 指向拥有此缓冲区元数据的复合事务的指针：正在运行的事务或提交事务（如果有）。
+	 * 仅适用于事务数据或元数据 journaling 列表上的缓冲区。
 	 */
 	transaction_t *b_transaction;
 
@@ -81,6 +84,8 @@ struct journal_head {
 	 * modifying the buffer's metadata, if there was already a transaction
 	 * committing it when the new transaction touched it.
 	 * [t_list_lock] [b_state_lock]
+	 * 
+	 * 指向当前正在修改缓冲区元数据的正在运行的复合事物的指针，如果新事物touch它时已经有一个事务提交它
 	 */
 	transaction_t *b_next_transaction;
 
@@ -94,6 +99,8 @@ struct journal_head {
 	 * Pointer to the compound transaction against which this buffer
 	 * is checkpointed.  Only dirty buffers can be checkpointed.
 	 * [j_list_lock]
+	 * 
+	 * 指向为此缓冲区设置检查点的复合事务的指针。只有脏缓冲区才能被检查点
 	 */
 	transaction_t *b_cp_transaction;
 
@@ -101,7 +108,10 @@ struct journal_head {
 	 * Doubly-linked list of buffers still remaining to be flushed
 	 * before an old transaction can be checkpointed.
 	 * [j_list_lock]
+	 * 
+	 * 在旧事务可以被检查点之前，仍然需要刷新的缓冲区的双向链表.
 	 */
+	// TODO: WHAT?
 	struct journal_head *b_cpnext, *b_cpprev;
 
 	/* Trigger type */

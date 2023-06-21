@@ -57,6 +57,7 @@ static inline void __buffer_unlink(struct journal_head *jh)
 	}
 }
 
+// todo: 为什么要区分buffer list和buffer io list呢？
 /*
  * Move a buffer from the checkpoint list to the checkpoint io list
  *
@@ -64,13 +65,14 @@ static inline void __buffer_unlink(struct journal_head *jh)
  */
 static inline void __buffer_relink_io(struct journal_head *jh)
 {
-	transaction_t *transaction = jh->b_cp_transaction;
+	transaction_t *transaction = jh->b_cp_transaction;	// 指向为此缓冲区设置的复合事务的指针
 
 	__buffer_unlink_first(jh);
 
 	if (!transaction->t_checkpoint_io_list) {
-		jh->b_cpnext = jh->b_cpprev = jh;
+		jh->b_cpnext = jh->b_cpprev = jh;	// 没尊别的需要刷新的缓冲区，就当前jh自己闭环了
 	} else {
+		// jh->b_cpnext, jh->b_cpprev：在旧事务可以被检查点之前，仍然需要刷新的缓冲区的双向链表
 		jh->b_cpnext = transaction->t_checkpoint_io_list;
 		jh->b_cpprev = transaction->t_checkpoint_io_list->b_cpprev;
 		jh->b_cpprev->b_cpnext = jh;
@@ -88,6 +90,7 @@ static inline bool __cp_buffer_busy(struct journal_head *jh)
 {
 	struct buffer_head *bh = jh2bh(jh);
 
+	// jh->b_transaction: 指向拥有此缓冲区元数据的复合事务的指针
 	return (jh->b_transaction || buffer_locked(bh) || buffer_dirty(bh));
 }
 
@@ -106,8 +109,8 @@ __releases(&journal->j_state_lock)
 
 	nblocks = journal->j_max_transaction_buffers;
 	while (jbd2_log_space_left(journal) < nblocks) {
-		write_unlock(&journal->j_state_lock);
-		mutex_lock_io(&journal->j_checkpoint_mutex);
+		write_unlock(&journal->j_state_lock);	// jouranl剩余空间太小，导致当前线程写不了了，先放开锁，让别的线程写
+		mutex_lock_io(&journal->j_checkpoint_mutex);	// 获取checkpoint互斥锁
 
 		/*
 		 * Test again, another process may have checkpointed while we
@@ -125,7 +128,7 @@ __releases(&journal->j_state_lock)
 			mutex_unlock(&journal->j_checkpoint_mutex);
 			return;
 		}
-		spin_lock(&journal->j_list_lock);
+		spin_lock(&journal->j_list_lock);	// journal->j_list_lock: 保护buffer列表和内部buffer状态
 		space_left = jbd2_log_space_left(journal);
 		if (space_left < nblocks) {
 			int chkpt = journal->j_checkpoint_transactions != NULL;
@@ -172,7 +175,7 @@ static void
 __flush_batch(journal_t *journal, int *batch_count)
 {
 	int i;
-	struct blk_plug plug;
+	struct blk_plug plug;	// blk_plug的作用是将IO请求缓存在队列中以提高IO操作的效率
 
 	blk_start_plug(&plug);
 	for (i = 0; i < *batch_count; i++)
@@ -377,6 +380,14 @@ out:
  * even in abort state, but we must not update the super block if
  * checkpointing may have failed.  Otherwise, we would lose some metadata
  * buffers which should be written-back to the filesystem.
+ * 
+ * 检查日志的检查点事务列表，看看自上次更新超级块中的日志尾部以来，我们是否已经删除了任何事务。
+ * 如果是，我们可以立即前滚超级块以从日志中删除这些事务。
+ * 
+ * 返回<0表示错误，0表示成功，1表示没有要清理的内容。
+ * 
+ * 这是唯一需要注意事务终止的日志代码部分。检查点涉及写入主文件系统区域而不是日志，因此即使在中止状态下也可以继续进行，
+ * 但是如果检查点可能失败，则不能更新超级块。否则，我们将丢失应写回文件系统的某些元数据缓冲区。
  */
 
 int jbd2_cleanup_journal_tail(journal_t *journal)
@@ -384,10 +395,10 @@ int jbd2_cleanup_journal_tail(journal_t *journal)
 	tid_t		first_tid;
 	unsigned long	blocknr;
 
-	if (is_journal_aborted(journal))
+	if (is_journal_aborted(journal))	// 事务终止，返回负数表示错误
 		return -EIO;
 
-	if (!jbd2_journal_get_log_tail(journal, &first_tid, &blocknr))
+	if (!jbd2_journal_get_log_tail(journal, &first_tid, &blocknr))	// 返回1
 		return 1;
 	J_ASSERT(blocknr != 0);
 
@@ -440,6 +451,9 @@ static int journal_clean_one_cp_list(struct journal_head *jh, bool destroy)
 		 * if possible so we dont have an obligation
 		 * to finish processing. Bail out if preemption
 		 * requested:
+		 * 
+		 * 此函数仅在可能的情况下释放一些内存，因此我们没有义务完成处理。
+		 * 如果请求了抢占，则退出：
 		 */
 		if (need_resched())
 			return 0;
@@ -455,6 +469,9 @@ static int journal_clean_one_cp_list(struct journal_head *jh, bool destroy)
  * and try to release them. If the whole transaction is released, set
  * the 'released' parameter. Return the number of released checkpointed
  * buffers.
+ * 
+ * 在给定列表中找到 nr_to_scan 个写回（written-back）检查点缓冲区，并尝试释放它们。
+ * 如果整个事务被释放，则设置'released'参数。返回已释放的检查点缓冲区数。
  *
  * Called with j_list_lock held.
  */
@@ -501,6 +518,9 @@ static unsigned long journal_shrink_one_cp_list(struct journal_head *jh,
  * buffers.
  *
  * Called with j_list_lock held.
+ * 
+ * 找到日志中的 nr_to_scan 个写回检查点缓冲区，并尝试释放它们。返回已释放的检查点缓冲区数。
+ * 调用的时候持有 j_list_lock 锁。
  */
 unsigned long jbd2_journal_shrink_checkpoint_list(journal_t *journal,
 						  unsigned long *nr_to_scan)
@@ -657,6 +677,8 @@ void jbd2_journal_destroy_checkpoint(journal_t *journal)
  * journal_remove_checkpoint: called after a buffer has been committed
  * to disk (either by being write-back flushed to disk, or being
  * committed to the log).
+ * 
+ * 在缓冲区已提交到磁盘（通过write-back刷新到磁盘，或者提交到日志）之后调用
  *
  * We cannot safely clean a transaction out of the log until all of the
  * buffer updates committed in that transaction have safely been stored
@@ -666,8 +688,14 @@ void jbd2_journal_destroy_checkpoint(journal_t *journal)
  * called to remove the buffer from the existing transaction's
  * checkpoint lists.
  *
+ * 直到提交到该事务中的所有缓冲区更新都已安全地存储在磁盘的其他位置之后，我们才能安全地
+ * 清除日志中的事务。为了做到这点，事务中的所有缓冲区，都需要维护在事务的检查点列表中，
+ * 直到它们被重写，此时该函数被调用，从现有事务的检查点列表中删除缓冲区。
+ * 
  * The function returns 1 if it frees the transaction, 0 otherwise.
  * The function can free jh and bh.
+ * 
+ * 如果函数释放了事务，则返回1，否则返回0。函数可以释放jh和bh。
  *
  * This function is called with j_list_lock held.
  */
@@ -695,6 +723,10 @@ int __jbd2_journal_remove_checkpoint(struct journal_head *jh)
 	 * we hold j_list_lock and we have to be careful about races with
 	 * jbd2_journal_destroy(). So mark the writeback IO error in the
 	 * journal here and we abort the journal later from a better context.
+	 * 
+	 * 如果我们未能将缓冲区写出到磁盘，文件系统可能会变得不一致。我们不能在这里中止日志，
+	 * 因为我们持有 j_list_lock 并且我们必须小心与 jbd2_journal_destroy() 的竞争。
+	 * 因此，在这里在日志中标记写回IO错误，稍后我们从更好的上下文中中止日志。
 	 */
 	if (buffer_write_io_error(bh))
 		set_bit(JBD2_CHECKPOINT_IO_ERROR, &journal->j_atomic_flags);
@@ -713,6 +745,9 @@ int __jbd2_journal_remove_checkpoint(struct journal_head *jh)
 	 * buffer off a running or committing transaction's checkpoing list,
 	 * then even if the checkpoint list is empty, the transaction obviously
 	 * cannot be dropped!
+	 * 
+	 * 有一个特殊情况需要担心：如果我们刚刚从运行或提交事务的检查点列表中删除了缓冲区，
+	 * 那么即使检查点列表为空，该事务显然也不能被删除！
 	 *
 	 * The locking here around t_state is a bit sleazy.
 	 * See the comment at the end of jbd2_journal_commit_transaction().
@@ -740,6 +775,9 @@ int __jbd2_journal_remove_checkpoint(struct journal_head *jh)
  * journal_insert_checkpoint: put a committed buffer onto a checkpoint
  * list so that we know when it is safe to clean the transaction out of
  * the log.
+ * 
+ * journal_insert_checkpoint: 将已提交的缓冲区 jh 放入 事务transaction 的检查点列表，
+ * 以便我们知道何时可以安全地清除日志中的事务（那肯定是checkpoint完了才能清除日志区的事务）。
  *
  * Called with the journal locked.
  * Called with j_list_lock held.
@@ -756,14 +794,14 @@ void __jbd2_journal_insert_checkpoint(struct journal_head *jh,
 	jh->b_cp_transaction = transaction;
 
 	if (!transaction->t_checkpoint_list) {
-		jh->b_cpnext = jh->b_cpprev = jh;
-	} else {
+		jh->b_cpnext = jh->b_cpprev = jh;	// transaction里面没有ckpt_list，jh自己闭环
+	} else {	// 将 jh 插入到 transaction 的检查点列表中
 		jh->b_cpnext = transaction->t_checkpoint_list;
 		jh->b_cpprev = transaction->t_checkpoint_list->b_cpprev;
 		jh->b_cpprev->b_cpnext = jh;
 		jh->b_cpnext->b_cpprev = jh;
 	}
-	transaction->t_checkpoint_list = jh;
+	transaction->t_checkpoint_list = jh;	// jh成为新的 t_checkpoint_list 列表头
 	percpu_counter_inc(&transaction->t_journal->j_checkpoint_jh_count);
 }
 
@@ -772,6 +810,9 @@ void __jbd2_journal_insert_checkpoint(struct journal_head *jh,
  *
  * The transaction must have no links except for the checkpoint by this
  * point.
+ * 
+ * 我们已经完成了这个事务结构：再见...
+ * 在这个点，此事务必须没有除检查点之外的链接。
  *
  * Called with the journal locked.
  * Called with j_list_lock held.
@@ -782,9 +823,11 @@ void __jbd2_journal_drop_transaction(journal_t *journal, transaction_t *transact
 	assert_spin_locked(&journal->j_list_lock);
 
 	journal->j_shrink_transaction = NULL;
-	if (transaction->t_cpnext) {
+	if (transaction->t_cpnext) {	// 将当前transaction从（checkpoint_）transactions链表中移除
 		transaction->t_cpnext->t_cpprev = transaction->t_cpprev;
 		transaction->t_cpprev->t_cpnext = transaction->t_cpnext;
+		// journal中的j_checkpoint_transactions指向函数参数中给的transaction，且该参数transaction是他自己
+		// 那就是全部checkpoint_transaction都完成了，所以j_checkpoint_transactions指向NULL
 		if (journal->j_checkpoint_transactions == transaction)
 			journal->j_checkpoint_transactions =
 				transaction->t_cpnext;

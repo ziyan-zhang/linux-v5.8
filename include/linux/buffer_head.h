@@ -57,6 +57,10 @@ typedef void (bh_end_io_t)(struct buffer_head *bh, int uptodate);
  * mappings (via a get_block_t call), for tracking state within
  * a page (via a page_mapping) and for wrapping bio submission
  * for backward compatibility reasons (e.g. submit_bh).
+ * 
+ * 历史上，buffer_head 用于映射 page 中的单个块，当然也作为通过文件系统和块层的IO单元。
+ * 如今，基本的IO单元是bio，buffer_heads 用于提取块映射（通过 get_block_t 调用），
+ * 用于跟踪 page 中的状态（通过 page_mapping），并且为了向后兼容性而包装bio提交（例如 submit_bh）。
  */
 struct buffer_head {
 	unsigned long b_state;		/* buffer state bitmap (see above) */

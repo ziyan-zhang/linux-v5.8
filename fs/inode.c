@@ -1789,6 +1789,8 @@ EXPORT_SYMBOL(iput);
  *
  *	Returns -EINVAL in case of error, 0 otherwise. If mapping falls into a
  *	hole, returns 0 and ``*block`` is also set to 0.
+ * 
+ * 返回inode对应文件的开始块号给到block
  */
 int bmap(struct inode *inode, sector_t *block)
 {

@@ -74,10 +74,14 @@ extern void jbd2_free(void *ptr, size_t size);
 /**
  * typedef handle_t - The handle_t type represents a single atomic update being performed by some process.
  *
+ * handle_t 类型表示某个进程正在执行的单个原子更新。
+ * 
  * All filesystem modifications made by the process go
  * through this handle.  Recursive operations (such as quota operations)
  * are gathered into a single update.
  *
+ * 所有该进程进行的文件系统修改都通过此句柄进行。递归操作（例如配额操作）被收集到单个更新中。
+ * 
  * The buffer credits field is used to account for journaled buffers
  * being modified by the running process.  To ensure that there is
  * enough log space for all outstanding operations, we need to limit the
@@ -86,6 +90,10 @@ extern void jbd2_free(void *ptr, size_t size);
  * the transaction, so that at all times we know how many buffers the
  * outstanding updates on a transaction might possibly touch.
  *
+ * 缓冲区 credits 字段用于统计正在运行的进程修改的日志缓冲区。为了保证所有未完成的操作都有足够的日志空间，
+ * 我们需要限制任何时候可能存在的未完成的缓冲区数量。当操作完成时，未使用的任何缓冲区 credits 都将退还给事务，
+ * 因此我们始终知道事务上未完成的更新可能会 touch 多少缓冲区。
+ * 
  * This is an opaque datatype.
  **/
 typedef struct jbd2_journal_handle handle_t;	/* Atomic operation type */
@@ -99,6 +107,9 @@ typedef struct jbd2_journal_handle handle_t;	/* Atomic operation type */
  * We use the journal_t to keep track of all outstanding transaction
  * activity on the filesystem, and to manage the state of the log
  * writing process.
+ * 
+ * journal_t 维护单个文件系统的所有日志状态信息。journal_t 从 fs 超级块结构链接到。
+ * 我们使用 journal_t 跟踪文件系统上所有未完成的事务活动，并管理日志写入过程的状态。
  *
  * This is an opaque datatype.
  **/
@@ -127,10 +138,11 @@ typedef struct journal_s	journal_t;	/* Journal control structure */
 
 /*
  * Standard header for all descriptor blocks:
+ * 所有描述符块的标准头：
  */
 typedef struct journal_header_s
 {
-	__be32		h_magic;
+	__be32		h_magic;	// be32: big-endian 32-bit，32位的大端序无符号整数
 	__be32		h_blocktype;
 	__be32		h_sequence;
 } journal_header_t;
@@ -145,7 +157,7 @@ typedef struct journal_header_s
 
 #define JBD2_CRC32_CHKSUM_SIZE 4
 
-#define JBD2_CHECKSUM_BYTES (32 / sizeof(u32))
+#define JBD2_CHECKSUM_BYTES (32 / sizeof(u32))	// u32无符号32位整数
 /*
  * Commit block header for storing transactional checksums:
  *
@@ -232,12 +244,12 @@ typedef struct journal_superblock_s
 	/* Static information describing the journal */
 	__be32	s_blocksize;		/* journal device blocksize */
 	__be32	s_maxlen;		/* total blocks in journal file */
-	__be32	s_first;		/* first block of log information */
+	__be32	s_first;		/* first block of log information，日志信息的第一个块 */
 
 /* 0x0018 */
 	/* Dynamic information describing the current state of the log */
-	__be32	s_sequence;		/* first commit ID expected in log */
-	__be32	s_start;		/* blocknr of start of log */
+	__be32	s_sequence;		/* first commit ID expected in log，日志中预期的第一个提交ID */
+	__be32	s_start;		/* blocknr of start of log，日志开始的块号 */
 
 /* 0x0020 */
 	/* Error value, as set by jbd2_journal_abort(). */
@@ -392,6 +404,9 @@ static inline void jbd_unlock_bh_journal_head(struct buffer_head *bh)
  * Commit of the inode data in progress. We use this flag to protect us from
  * concurrent deletion of inode. We cannot use reference to inode for this
  * since we cannot afford doing last iput() on behalf of kjournald
+ * 
+ * 提交正在进行的iNode数据。我们使用这个标志来保护我们免受并发删除iNode的影响。
+ * 我们不能使用对iNode的引用，因为我们不能代表kjournald执行最后的iput()。
  */
 #define JI_COMMIT_RUNNING (1 << __JI_COMMIT_RUNNING)
 /* Write allocated dirty buffers in this inode before commit */
@@ -402,6 +417,8 @@ static inline void jbd_unlock_bh_journal_head(struct buffer_head *bh)
 /**
  * struct jbd2_inode - The jbd_inode type is the structure linking inodes in
  * ordered mode present in a transaction so that we can sync them during commit.
+ * 
+ * jbd_inode 结构是事务中有序模式下链接iNode的结构。这样我们就可以在提交期间同步它们。
  */
 struct jbd2_inode {
 	/**
@@ -409,6 +426,8 @@ struct jbd2_inode {
 	 *
 	 * Which transaction does this inode belong to? Either the running
 	 * transaction or the committing one. [j_list_lock]
+	 * 
+	 * 这个iNode属于哪个事务？运行中的事务或提交中的事务。
 	 */
 	transaction_t *i_transaction;
 
@@ -417,6 +436,8 @@ struct jbd2_inode {
 	 *
 	 * Pointer to the running transaction modifying inode's data in case
 	 * there is already a committing transaction touching it. [j_list_lock]
+	 * 
+	 * 在已经有一个提交事务接触inode的情况下，指向修改inode数据的运行事务。
 	 */
 	transaction_t *i_next_transaction;
 
@@ -459,6 +480,9 @@ struct jbd2_revoke_table_s;
 /**
  * struct jbd2_journal_handle - The jbd2_journal_handle type is the concrete
  *     type associated with handle_t.
+ * 
+ * jbd2_journal_handle 类型是与handle_t相关联的具体类型。
+ * 
  * @h_transaction: Which compound transaction is this update a part of?
  * @h_journal: Which journal handle belongs to - used iff h_reserved set.
  * @h_rsv_handle: Handle reserved for finishing the logical operation.
@@ -526,6 +550,8 @@ struct transaction_chp_stats_s {
 /* The transaction_t type is the guts of the journaling mechanism.  It
  * tracks a compound transaction through its various states:
  *
+ * transaction_t是日志机制的核心，它跟踪复合事务的各种状态：
+ * 
  * RUNNING:	accepting new updates
  * LOCKED:	Updates still running but we don't accept new ones
  * RUNDOWN:	Updates are tidying up but have finished requesting
@@ -538,6 +564,8 @@ struct transaction_chp_stats_s {
  * running transaction, and all of the buffers committed but not yet
  * flushed to home for finished transactions.
  * (Locking Documentation improved by LockDoc)
+ * 
+ * 事务跟踪正在运行事务修改的所有缓冲区，以及已提交但尚未刷新到 home 的已完成事务的所有缓冲区。
  */
 
 /*
@@ -589,6 +617,7 @@ struct transaction_s
 	 * Where in the log does this transaction's commit start? [no locking]
 	 */
 	unsigned long		t_log_start;
+	// TODO: 确定这个是多个日志的关键吧
 
 	/*
 	 * Number of buffers on the t_buffers list [j_list_lock, no locks
@@ -602,6 +631,7 @@ struct transaction_s
 	 * jbd2 thread]
 	 */
 	struct journal_head	*t_reserved_list;
+	// todo: 这是怎么得来的？
 
 	/*
 	 * Doubly-linked circular list of all metadata buffers owned by this
@@ -613,18 +643,24 @@ struct transaction_s
 	 * Doubly-linked circular list of all forget buffers (superseded
 	 * buffers which we can un-checkpoint once this transaction commits)
 	 * [j_list_lock]
+	 * 
+	 * 所有遗忘区的双向循环链表（我们可以在事务提交后取消检查点的被取代的缓冲区）
 	 */
 	struct journal_head	*t_forget;
 
 	/*
 	 * Doubly-linked circular list of all buffers still to be flushed before
 	 * this transaction can be checkpointed. [j_list_lock]
+	 * 
+	 * 在此事务可以检查点之前，所有仍然需要刷新的缓冲区的双向循环链表
 	 */
 	struct journal_head	*t_checkpoint_list;
 
 	/*
 	 * Doubly-linked circular list of all buffers submitted for IO while
 	 * checkpointing. [j_list_lock]
+	 * 
+	 * 检查点时为io提交的所有缓冲区的双向循环链表
 	 */
 	struct journal_head	*t_checkpoint_io_list;
 
@@ -634,6 +670,8 @@ struct transaction_s
 	 * the shadow buffers on this list match each other one for
 	 * one at all times. [j_list_lock, no locks needed for jbd2
 	 * thread]
+	 * 
+	 * 被日志IO阴影的元数据缓冲区的双向循环链表。iobuf列表上的IO缓冲区和此列表上的影子缓冲区始终一一对应
 	 */
 	struct journal_head	*t_shadow_list;
 
@@ -642,6 +680,9 @@ struct transaction_s
 	 * this to track inodes in data=ordered and data=journal mode that
 	 * need special handling on transaction commit; also used by ocfs2.
 	 * [j_list_lock]
+	 * 
+	 * 与事务相关联的inode列表；例如，ext4使用它来跟踪data=ordered和data=journal模式下
+	 * 在事务提交时需要特殊处理的inode；ocfs2也使用
 	 */
 	struct list_head	t_inode_list;
 
@@ -673,6 +714,7 @@ struct transaction_s
 	/*
 	 * Number of outstanding updates running on this transaction
 	 * [none]
+	 * 在此事务上运行的未完成更新数
 	 */
 	atomic_t		t_updates;
 
@@ -681,12 +723,16 @@ struct transaction_s
 	 * This is including all credits reserved when starting transaction
 	 * handles as well as all journal descriptor blocks needed for this
 	 * transaction. [none]
+	 * 
+	 * 在此日志中为该事务保留的块数。这包括在启动事务处理句柄时保留的所有信用额度以及
+	 * 此事务所需的所有日志描述符块（就是在信用额度基础上加了额外的描述符块）
 	 */
 	atomic_t		t_outstanding_credits;
 
 	/*
 	 * Number of revoke records for this transaction added by already
 	 * stopped handles. [none]
+	 * 已停止句柄添加的此事务的撤销记录数
 	 */
 	atomic_t		t_outstanding_revokes;
 
@@ -694,16 +740,21 @@ struct transaction_s
 	 * How many handles used this transaction? [none]
 	 */
 	atomic_t		t_handle_count;
+	// todo: 多个 handle 会用同一个 transaction 吗？怎样用的？
 
 	/*
 	 * Forward and backward links for the circular list of all transactions
 	 * awaiting checkpoint. [j_list_lock]
+	 * 
+	 * 所有等待检查点的事务的循环链表的前向和后向链接
 	 */
 	transaction_t		*t_cpnext, *t_cpprev;
 
 	/*
 	 * When will the transaction expire (become due for commit), in jiffies?
 	 * [no locking]
+	 * 
+	 * 事务何时到期（到期提交），以jiffies为单位？
 	 */
 	unsigned long		t_expires;
 
@@ -715,6 +766,7 @@ struct transaction_s
 	/*
 	 * This transaction is being forced and some process is
 	 * waiting for it to finish.
+	 * 此事务被强制执行，某些进程正在等待它完成
 	 */
 	unsigned int t_synchronous_commit:1;
 
@@ -724,6 +776,8 @@ struct transaction_s
 	/*
 	 * For use by the filesystem to store fs-specific data
 	 * structures associated with the transaction
+	 * 
+	 * 供文件系统使用，用于存储与事务相关联的特定于文件系统的数据结构
 	 */
 	struct list_head	t_private_list;
 };
@@ -766,6 +820,7 @@ enum passtype {PASS_SCAN, PASS_REVOKE, PASS_REPLAY};
 /**
  * struct journal_s - The journal_s type is the concrete type associated with
  *     journal_t.
+ * journal_s 类型是与 journal_t 关联的具体类型
  */
 struct journal_s
 {
@@ -810,6 +865,8 @@ struct journal_s
 
 	/**
 	 * @j_state_lock: Protect the various scalars in the journal.
+	 * 保护日志中的各种标量
+	 * TODO: 思考下这个会不会成为瓶颈啊
 	 */
 	rwlock_t		j_state_lock;
 
@@ -856,16 +913,21 @@ struct journal_s
 	 *
 	 * Wait queue for waiting for a locked transaction to start committing,
 	 * or for a barrier lock to be released.
+	 * 
+	 * 等待锁定事务开始提交，或等待屏障锁释放，的等待队列
 	 */
 	wait_queue_head_t	j_wait_transaction_locked;
 
 	/**
 	 * @j_wait_done_commit: Wait queue for waiting for commit to complete.
+	 * 等待提交完成的等待队列
 	 */
 	wait_queue_head_t	j_wait_done_commit;
 
 	/**
 	 * @j_wait_commit: Wait queue to trigger commit.
+	 * 等待在 j_wait_commit 等待队列中的进程或线程将等待日志系统提交事务，
+	 * 并在事务提交后被唤醒
 	 */
 	wait_queue_head_t	j_wait_commit;
 
@@ -892,6 +954,8 @@ struct journal_s
 	 * @j_checkpoint_mutex:
 	 *
 	 * Semaphore for locking against concurrent checkpoints.
+	 * 用于锁定并发 checkpoints 的信号量
+	 * TODO: 并发检查点的意义是什么？检查点为啥还要防止并发，那不是互不重合的磁盘区域吗？
 	 */
 	struct mutex		j_checkpoint_mutex;
 
@@ -902,6 +966,9 @@ struct journal_s
 	 * was moved from jbd2_log_do_checkpoint() to reduce stack
 	 * usage.  Access to this array is controlled by the
 	 * @j_checkpoint_mutex.  [j_checkpoint_mutex]
+	 * 
+	 * 检查点例程使用的缓冲头列表。这是从 jbd2_log_do_checkpoint() 移动过来的，以减少堆栈使用。
+	 * 对该数组的访问由 @j_checkpoint_mutex 控制。
 	 */
 	struct buffer_head	*j_chkpt_bhs[JBD2_NR_BATCH];
 
@@ -910,6 +977,8 @@ struct journal_s
 	 *
 	 * Journal head shrinker, reclaim buffer's journal head which
 	 * has been written back.
+	 * 
+	 * 日志头收缩器，回收已写回的缓冲区的日志头。
 	 */
 	struct shrinker		j_shrinker;
 
@@ -925,6 +994,7 @@ struct journal_s
 	 *
 	 * Record next transaction will shrink on the checkpoint list.
 	 * [j_list_lock]
+	 * 记录将收缩在检查点列表上的下一个事务
 	 */
 	transaction_t		*j_shrink_transaction;
 
@@ -933,6 +1003,8 @@ struct journal_s
 	 *
 	 * Journal head: identifies the first unused block in the journal.
 	 * [j_state_lock]
+	 * 
+	 * 日志头：标识日志中第一个未使用的块。
 	 */
 	unsigned long		j_head;
 
@@ -941,6 +1013,8 @@ struct journal_s
 	 *
 	 * Journal tail: identifies the oldest still-used block in the journal.
 	 * [j_state_lock]
+	 * 
+	 * 日志尾：标识日志中最旧的仍在使用的块。（其实是日志尾在日志头前面：日志头追赶日志尾）
 	 */
 	unsigned long		j_tail;
 
@@ -949,6 +1023,8 @@ struct journal_s
 	 *
 	 * Journal free: how many free blocks are there in the journal?
 	 * [j_state_lock]
+	 * 
+	 * 日志空闲：日志中有多少空闲块？
 	 */
 	unsigned long		j_free;
 
@@ -957,6 +1033,8 @@ struct journal_s
 	 *
 	 * The block number of the first usable block in the journal
 	 * [j_state_lock].
+	 * 
+	 * 日志中第一个可用块的块号（... j_first..可用的块..j_last  j_head..写好的未用的日志..j_tail ...）
 	 */
 	unsigned long		j_first;
 
@@ -965,6 +1043,8 @@ struct journal_s
 	 *
 	 * The block number one beyond the last usable block in the journal
 	 * [j_state_lock].
+	 * 
+	 * 日志中最后一个可用块的块号
 	 */
 	unsigned long		j_last;
 
@@ -982,6 +1062,8 @@ struct journal_s
 	 * Number of fast commit blocks currently allocated. Accessed only
 	 * during fast commit. Currently only process can do fast commit, so
 	 * this field is not protected by any lock.
+	 * 
+	 * 当前已分配的快速提交块数。仅在快速提交期间访问。目前只有进程可以进行快速提交，因此该字段不受任何锁的保护。
 	 */
 	unsigned long		j_fc_off;
 
@@ -1052,6 +1134,8 @@ struct journal_s
 	 * @j_tail_sequence:
 	 *
 	 * Sequence number of the oldest transaction in the log [j_state_lock]
+	 * 
+	 * 日志中最旧事务的序列号 [j_state_lock]
 	 */
 	tid_t			j_tail_sequence;
 
@@ -1059,6 +1143,7 @@ struct journal_s
 	 * @j_transaction_sequence:
 	 *
 	 * Sequence number of the next transaction to grant [j_state_lock]
+	 * 下一个要授予【j_state_lock】的事务的序列号
 	 */
 	tid_t			j_transaction_sequence;
 
@@ -1067,6 +1152,7 @@ struct journal_s
 	 *
 	 * Sequence number of the most recently committed transaction
 	 * [j_state_lock, no lock for quick racy checks]
+	 * 最近提交的事务的序列号
 	 */
 	tid_t			j_commit_sequence;
 
@@ -1075,6 +1161,7 @@ struct journal_s
 	 *
 	 * Sequence number of the most recent transaction wanting commit
 	 * [j_state_lock, no lock for quick racy checks]
+	 * 最近请求（想要）提交的事务的序列号
 	 */
 	tid_t			j_commit_request;
 
@@ -1090,6 +1177,8 @@ struct journal_s
 
 	/**
 	 * @j_task: Pointer to the current commit thread for this journal.
+	 * 
+	 * 指向该日志的当前提交线程的指针
 	 */
 	struct task_struct	*j_task;
 
@@ -1098,6 +1187,8 @@ struct journal_s
 	 *
 	 * Maximum number of metadata buffers to allow in a single compound
 	 * commit transaction.
+	 * 
+	 * 单个复合提交事务中允许的最大元数据缓冲区数
 	 */
 	int			j_max_transaction_buffers;
 
@@ -1117,6 +1208,7 @@ struct journal_s
 
 	/**
 	 * @j_commit_timer: The timer used to wakeup the commit thread.
+	 * 用于唤醒提交线程的定时器
 	 */
 	struct timer_list	j_commit_timer;
 
@@ -1169,6 +1261,8 @@ struct journal_s
 	 *
 	 * The pid of the last person to run a synchronous operation
 	 * through the journal.
+	 * 
+	 * 最后一个通过日志运行同步操作的人的pid
 	 */
 	pid_t			j_last_sync_writer;
 
@@ -1210,6 +1304,8 @@ struct journal_s
 	 * This function is called for all inodes associated with the
 	 * committing transaction marked with JI_WRITE_DATA flag
 	 * before we start to write out the transaction to the journal.
+	 * 
+	 * 在我们开始将事务写出到日志之前，为与标记为JI_WRITE_DATA标志的提交事务相关联的所有inode调用此函数
 	 */
 	int			(*j_submit_inode_data_buffers)
 					(struct jbd2_inode *);
@@ -1221,12 +1317,16 @@ struct journal_s
 	 * committing transaction marked with JI_WAIT_DATA flag
 	 * after we have written the transaction to the journal
 	 * but before we write out the commit block.
+	 * 
+	 * 在我们将事务写入日志之后，但在我们写出提交块之前，为与标记为JI_WAIT_DATA标志的提交事务
+	 * 相关联的所有inode调用此函数
 	 */
 	int			(*j_finish_inode_data_buffers)
 					(struct jbd2_inode *);
 
 	/*
 	 * Journal statistics
+	 * 日志统计量
 	 */
 
 	/**
@@ -1236,6 +1336,7 @@ struct journal_s
 
 	/**
 	 * @j_proc_entry: procfs entry for the jbd statistics directory.
+	 * jbd统计目录的procfs条目
 	 */
 	struct proc_dir_entry	*j_proc_entry;
 
@@ -1268,6 +1369,7 @@ struct journal_s
 	 * @j_csum_seed:
 	 *
 	 * Precomputed journal UUID checksum for seeding other checksums.
+	 * 预先计算的UUID校验和，用于播种其他校验和
 	 */
 	__u32 j_csum_seed;
 
@@ -1281,6 +1383,10 @@ struct journal_s
 	 * where the running transaction has to wait for all handles to be
 	 * dropped to commit that transaction and also acquiring a handle may
 	 * require transaction commit to finish.
+	 * 
+	 * lockdep实体来跟踪事务提交的依赖关系。句柄持有这个锁用于读取，当我们提交时，
+	 * 我们会获取这个锁用于写入。这与jbd2日志记录的属性相匹配，其中正在运行的事务必须
+	 * 等待所有句柄被丢弃以提交该事务，并且获取句柄可能需要事务提交完成。
 	 */
 	struct lockdep_map	j_trans_commit_map;
 #endif
@@ -1303,6 +1409,10 @@ struct journal_s
 	 * commit replay should continue. Return value of JBD2_FC_REPLAY_STOP
 	 * indicates the end of replay (no more blocks remaining). A negative
 	 * return value indicates error.
+	 * 
+	 * 文件系统特定的函数，执行快速提交的重放。JBD2在日志中找到每个快速提交块时都会调用此函数。
+	 * 此函数应返回JBD2_FC_REPLAY_CONTINUE，以指示块已正确处理，并且应继续重放更多的快速提交。
+	 * 返回值JBD2_FC_REPLAY_STOP表示重放结束（没有剩余的块）。负返回值表示错误。
 	 */
 	int (*j_fc_replay_callback)(struct journal_s *journal,
 				    struct buffer_head *bh,
@@ -1411,7 +1521,7 @@ JBD2_FEATURE_INCOMPAT_FUNCS(fast_commit,	FAST_COMMIT)
  * Journal atomic flag definitions
  */
 #define JBD2_CHECKPOINT_IO_ERROR	0x001	/* Detect io error while writing
-						 * buffer back to disk */
+						//  * buffer back to disk */
 
 /*
  * Function declarations for the journaling transaction and buffer
@@ -1459,10 +1569,13 @@ void __jbd2_journal_insert_checkpoint(struct journal_head *, transaction_t *);
 
 struct jbd2_buffer_trigger_type {
 	/*
-	 * Fired a the moment data to write to the journal are known to be
+	 * Fired at the moment data to write to the journal are known to be
 	 * stable - so either at the moment b_frozen_data is created or just
 	 * before a buffer is written to the journal.  mapped_data is a mapped
 	 * buffer that is the frozen data for commit.
+	 * 
+	 * 在写入日志的数据被认为是稳定的那一刻触发 -- 所以要么在创建 b_frozen_data 的时候，
+	 * 要么在 buffer 被写入日志之前。mapped_data是一个映射的buffer，是提交的冻结数据。
 	 */
 	void (*t_frozen)(struct jbd2_buffer_trigger_type *type,
 			 struct buffer_head *bh, void *mapped_data,
@@ -1502,6 +1615,11 @@ extern void jbd2_journal_free_transaction(transaction_t *);
  *
  * Note that the locking is completely interrupt unsafe.  We never touch
  * journal structures from interrupts.
+ * 
+ * 我们需要在事务状态改变的时候锁住日志，这样在我们正在将它移动到提交阶段的时候，没有人会试图处理正在运行的事务。
+ * j_state_lock就是这样做的。
+ * 
+ * 注意，锁定是完全中断不安全的。我们从不从中断中触摸日志结构。
  */
 
 static inline handle_t *journal_current_handle(void)
@@ -1610,6 +1728,8 @@ static inline void jbd2_free_handle(handle_t *handle)
 /*
  * jbd2_inode management (optional, for those file systems that want to use
  * dynamically allocated jbd2_inode structures)
+ * 
+ * jbd2_inode管理，可选，对于那些想要使用动态分配的jbd2_inode结构的文件系统
  */
 extern struct kmem_cache *jbd2_inode_cache;
 
@@ -1686,6 +1806,9 @@ static inline int jbd2_journal_get_max_txn_bufs(journal_t *journal)
  * either inside the journaling layer or indicated to us by the client
  * (eg. ext3), and that we and should not commit any further
  * transactions.
+ * 
+ * 用于测试JBD2_ABORT状态标志的简单测试包装函数。当设置了这个位时，表示我们在日志层内部
+ * 或者客户端（例如ext3）指示的地方发生了致命错误，我们不应该提交任何进一步的事务。
  */
 
 static inline int is_journal_aborted(journal_t *journal)
@@ -1708,7 +1831,10 @@ static inline void jbd2_journal_abort_handle(handle_t *handle)
 #endif /* __KERNEL__   */
 
 /* Comparison functions for transaction IDs: perform comparisons using
- * modulo arithmetic so that they work over sequence number wraps. */
+ * modulo arithmetic so that they work over sequence number wraps.
+ * 
+ * 事务ID的比较函数：使用模算术执行比较，以便它们在序列号包装上工作。
+ */
 
 static inline int tid_gt(tid_t x, tid_t y)
 {
@@ -1740,6 +1866,8 @@ static inline int jbd2_journal_has_csum_v2or3(journal_t *journal)
 
 static inline int jbd2_journal_get_num_fc_blks(journal_superblock_t *jsb)
 {
+	// 在使用网络传输协议（如TCP/IP）和从外部设备读取二进制数据时，需要进行字节序转换，
+	// 以确保不同系统之间的数据一致。be32_to_cpu()函数用于将32位大端字节序转换为主机字节序。
 	int num_fc_blocks = be32_to_cpu(jsb->s_num_fc_blks);
 
 	return num_fc_blocks ? num_fc_blocks : JBD2_DEFAULT_FAST_COMMIT_BLOCKS;
