@@ -926,8 +926,7 @@ struct journal_s
 
 	/**
 	 * @j_wait_commit: Wait queue to trigger commit.
-	 * 等待在 j_wait_commit 等待队列中的进程或线程将等待日志系统提交事务，
-	 * 并在事务提交后被唤醒
+	 * 等待 触发提交 的等待队列
 	 */
 	wait_queue_head_t	j_wait_commit;
 

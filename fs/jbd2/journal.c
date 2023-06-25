@@ -307,6 +307,7 @@ static int jbd2_journal_start_thread(journal_t *journal)
 	return 0;
 }
 
+// 唤醒等待进行提交的等待队列j_wait_commit和等待提交完成的等待队列j_wait_done_commit
 static void journal_kill_thread(journal_t *journal)
 {
 	write_lock(&journal->j_state_lock);
@@ -314,7 +315,9 @@ static void journal_kill_thread(journal_t *journal)
 
 	while (journal->j_task) {
 		write_unlock(&journal->j_state_lock);
-		wake_up(&journal->j_wait_commit);	// 触发提交的等待队列，TODO: WAHT?
+		// 唤醒等待进行提交的等待队列
+		wake_up(&journal->j_wait_commit);
+		// 一旦j_task == NULL，唤醒等待提交完成的等待队列
 		wait_event(journal->j_wait_done_commit, journal->j_task == NULL);
 		write_lock(&journal->j_state_lock);
 	}
@@ -517,6 +520,8 @@ repeat:
 /*
  * Called with j_state_lock locked for writing.
  * Returns true if a transaction commit was started.
+ * 
+ * 主要做的事唤醒等待 提交触发 的线程
  * 调用时锁定 j_state_lock 以进行写入。如果事务提交已开始，则返回true。
  */
 static int __jbd2_log_start_commit(journal_t *journal, tid_t target)
@@ -542,7 +547,7 @@ static int __jbd2_log_start_commit(journal_t *journal, tid_t target)
 			  journal->j_commit_request,
 			  journal->j_commit_sequence);
 		journal->j_running_transaction->t_requested = jiffies;
-		wake_up(&journal->j_wait_commit);
+		wake_up(&journal->j_wait_commit);	// 现在提交已触发，唤醒等待 触发提交 的等待队列
 		return 1;
 	} else if (!tid_geq(journal->j_commit_request, target))
 		/* This should never happen, but if it does, preserve
@@ -730,7 +735,7 @@ EXPORT_SYMBOL(jbd2_trans_will_send_data_barrier);
  * Wait for a specified commit to complete.
  * The caller may not hold the journal lock.
  * 
- * 等待指定的提交完成。调用者可能不持有日志锁。
+ * 等待指定tid的提交完成。调用者可能不持有日志锁。
  * TODO: 那写锁是什么时候拿的和释放的呢，为了commit的话？
  */
 int jbd2_log_wait_commit(journal_t *journal, tid_t tid)
@@ -2285,13 +2290,17 @@ recovery_error:
  * Release a journal_t structure once it is no longer in use by the
  * journaled object.
  * Return <0 if we couldn't clean up the journal.
+ * 
+ * 释放一个journal_t结构，一旦它不再被日志对象使用。
+ * 如果我们无法清理日志，则返回<0。
  */
 int jbd2_journal_destroy(journal_t *journal)
 {
 	int err = 0;
 
-	/* Wait for the commit thread to wake up and die. */
-	journal_kill_thread(journal);
+	/* Wait for the commit thread to wake up and die. 等待提交线程醒来和死去 */
+	// 下句唤醒等待进行提交的等待队列j_wait_commit、和等待提交完成的等待队列j_wait_done_commit
+	journal_kill_thread(journal);	
 
 	/* Force a final log commit */
 	if (journal->j_running_transaction)
@@ -2328,6 +2337,9 @@ int jbd2_journal_destroy(journal_t *journal)
 	 * write out io error flag and abort the journal if some buffer failed
 	 * to write back to the original location, otherwise the filesystem
 	 * may become inconsistent.
+	 * 
+	 * 好的，所有检查点事务都已检查，现在检查写出io错误标志并中止日志，
+	 * 如果某些缓冲区无法写回原始位置，否则文件系统可能变得不一致。
 	 */
 	if (!is_journal_aborted(journal) &&
 	    test_bit(JBD2_CHECKPOINT_IO_ERROR, &journal->j_atomic_flags))
@@ -2378,6 +2390,8 @@ int jbd2_journal_destroy(journal_t *journal)
  *
  * Check whether the journal uses all of a given set of
  * features.  Return true (non-zero) if it does.
+ * 
+ * 检查日志是否使用给定的一组功能。如果是，则返回true（非零）。
  **/
 
 int jbd2_journal_check_used_features(journal_t *journal, unsigned long compat,
@@ -2413,7 +2427,10 @@ int jbd2_journal_check_used_features(journal_t *journal, unsigned long compat,
  *
  * Check whether the journaling code supports the use of
  * all of a given set of features on this journal.  Return true
- * (non-zero) if it can. */
+ * (non-zero) if it can. 
+ * 
+ * 检查日志代码是否支持在此日志上使用给定的一组功能。如果可以，则返回true（非零）。
+ * */
 
 int jbd2_journal_check_available_features(journal_t *journal, unsigned long compat,
 				      unsigned long ro, unsigned long incompat)
@@ -2475,6 +2492,7 @@ jbd2_journal_initialize_fast_commit(journal_t *journal)
  * Mark a given journal feature as present on the
  * superblock.  Returns true if the requested features could be set.
  *
+ * 将给定的日志功能标记为存在于超级块中。如果可以设置请求的功能，则返回true。
  */
 
 int jbd2_journal_set_features(journal_t *journal, unsigned long compat,
@@ -2566,6 +2584,8 @@ int jbd2_journal_set_features(journal_t *journal, unsigned long compat,
  *
  * Clear a given journal feature as present on the
  * superblock.
+ * 
+ * 清除超级块上存在的给定日志功能
  */
 void jbd2_journal_clear_features(journal_t *journal, unsigned long compat,
 				unsigned long ro, unsigned long incompat)
@@ -2598,7 +2618,10 @@ EXPORT_SYMBOL(jbd2_journal_clear_features);
  * flags:
  *	JBD2_JOURNAL_FLUSH_DISCARD: issues discards for the journal blocks
  *	JBD2_JOURNAL_FLUSH_ZEROOUT: issues zeroouts for the journal blocks
- */
+ *
+ * 将给定日志的所有数据刷新到磁盘并清空日志。文件系统可以在以只读方式重新挂载时使用它，
+ * 以确保在重新挂载时不需要进行恢复。可选地，可以在刷新后对日志块发出丢弃或清零。
+ * */
 int jbd2_journal_flush(journal_t *journal, unsigned int flags)
 {
 	int err = 0;
@@ -2609,21 +2632,21 @@ int jbd2_journal_flush(journal_t *journal, unsigned int flags)
 	/* Force everything buffered to the log... */
 	if (journal->j_running_transaction) {
 		transaction = journal->j_running_transaction;
-		__jbd2_log_start_commit(journal, transaction->t_tid);
+		__jbd2_log_start_commit(journal, transaction->t_tid);	// 主要做的是唤醒等待触发提交的等待队列
 	} else if (journal->j_committing_transaction)
 		transaction = journal->j_committing_transaction;
 
-	/* Wait for the log commit to complete... */
+	/* Wait for the log commit to complete... 等待log提交完成*/
 	if (transaction) {
 		tid_t tid = transaction->t_tid;
 
 		write_unlock(&journal->j_state_lock);
-		jbd2_log_wait_commit(journal, tid);
+		jbd2_log_wait_commit(journal, tid);		// 等待指定的提交完成
 	} else {
 		write_unlock(&journal->j_state_lock);
 	}
 
-	/* ...and flush everything in the log out to disk. */
+	/* ...and flush everything in the log out to disk. 刷新log中的所有东西到disk */
 	spin_lock(&journal->j_list_lock);
 	while (!err && journal->j_checkpoint_transactions != NULL) {
 		spin_unlock(&journal->j_list_lock);
@@ -2651,7 +2674,11 @@ int jbd2_journal_flush(journal_t *journal, unsigned int flags)
 	 * This sets s_start==0 in the underlying superblock, which is
 	 * the magic code for a fully-recovered superblock.  Any future
 	 * commits of data to the journal will restore the current
-	 * s_start value. */
+	 * s_start value. 
+	 * 
+	 * 最后，将日志标记为不需要恢复。这将在底层超级块中设置s_start == 0，
+	 * 这是完全恢复的超级块的魔术代码。将来将数据提交到日志的任何操作都将恢复当前的s_start值。
+	 * */
 	jbd2_mark_journal_empty(journal, REQ_SYNC | REQ_FUA);
 
 	if (flags)
@@ -2680,6 +2707,12 @@ out:
  *
  * If 'write' is non-zero, then we wipe out the journal on disk; otherwise
  * we merely suppress recovery.
+ * 
+ * 擦除日志内容
+ * 安全地擦除日志的所有内容。如果日志包含任何有效的恢复信息，则会产生警告。
+ * 必须在journal_init_*()和jbd2_journal_load()之间调用。
+ * 
+ * 如果'write'非零，则我们擦除磁盘上的日志；否则我们只是抑制恢复。
  */
 
 int jbd2_journal_wipe(journal_t *journal, int write)
@@ -2699,7 +2732,7 @@ int jbd2_journal_wipe(journal_t *journal, int write)
 		write ? "Clearing" : "Ignoring");
 
 	err = jbd2_journal_skip_recovery(journal);
-	if (write) {
+	if (write) {	// write非零，擦除磁盘上的日志
 		/* Lock to make assertions happy... */
 		mutex_lock_io(&journal->j_checkpoint_mutex);
 		jbd2_mark_journal_empty(journal, REQ_SYNC | REQ_FUA);
@@ -2723,6 +2756,12 @@ int jbd2_journal_wipe(journal_t *journal, int write)
  * The jbd2_journal_abort function is intended to support higher level error
  * recovery mechanisms such as the ext2/ext3 remount-readonly error
  * mode.
+ * 
+ * 立即关闭日志
+ * 
+ * 执行整个日志的完全、立即关闭（不是单个事务的关闭），不能在不关闭和重新打开日志的情况下撤消。
+ * jbd2_journal_abort旨在支持更高级别的错误恢复机制，如ext2/ext3 remount-readonly错误模式。
+ * 
  *
  * Journal abort has very specific semantics.  Any existing dirty,
  * unjournaled buffers in the main filesystem will still be written to
@@ -2733,6 +2772,13 @@ int jbd2_journal_wipe(journal_t *journal, int write)
  * hitting the journal.  Atomicity cannot be guaranteed on an aborted
  * filesystem, but we _do_ attempt to leave as much data as possible
  * behind for fsck to use for cleanup.
+ * 
+ * 日志中止具有非常特定的语义。主文件系统中的任何现有的脏的，未记录的缓冲区仍将由bdflush
+ * 写入磁盘，但是日志机制将立即暂停，并且不会继续进行事务提交。
+ * 
+ * 任何脏的，记录的缓冲区将被写回磁盘，而不会影响日志。在中止的文件系统上不能保证原子性，
+ * 但是我们确实尝试尽可能多地留下数据供fsck用于清理。
+ * 
  *
  * Any attempt to get a new transaction handle on a journal which is in
  * ABORT state will just result in an -EROFS error return.  A
@@ -2748,7 +2794,15 @@ int jbd2_journal_wipe(journal_t *journal, int write)
  * transaction without having to complete the transaction to record the
  * failure to disk.  ext3_error, for example, now uses this
  * functionality.
- *
+ * 
+ * 任何尝试在处于ABORT状态的日志上获得新的事务句柄的尝试都将导致-EROFS错误返回。
+ * 一个现存handle上的jbd2_journal_stop会返回-EIO，如果我们在更新期间进入中止状态。
+ * 
+ * 递归事务不会被日志中止打扰，直到最后的jbd2_journal_stop，它将收到-EIO错误。
+ * 
+ * 最后，jbd2_journal_abort调用允许调用者提供一个errno，该errno将被记录（如果可能）在
+ * 日志超级块中。这允许客户端在事务中间记录失败条件，而无需完成事务以将失败记录到磁盘。
+ * 例如，ext3_error现在使用此功能。
  */
 
 void jbd2_journal_abort(journal_t *journal, int errno)
@@ -2760,12 +2814,17 @@ void jbd2_journal_abort(journal_t *journal, int errno)
 	 * races between filesystem's error handling flow (e.g. ext4_abort()),
 	 * ensure panic after the error info is written into journal's
 	 * superblock.
+	 * 
+	 * 锁定中止过程，直到所有操作完成，这避免了文件系统的错误处理流程之间的竞争
+	 * （例如ext4_abort（）），确保panic发生在错误信息写入日志的超级块后。
 	 */
 	mutex_lock(&journal->j_abort_mutex);
 	/*
 	 * ESHUTDOWN always takes precedence because a file system check
 	 * caused by any other journal abort error is not required after
 	 * a shutdown triggered.
+	 * 
+	 * ESHUTDOWN始终优先，因为在触发关机后，不需要由任何其他日志中止错误引起的文件系统检查。
 	 */
 	write_lock(&journal->j_state_lock);
 	if (journal->j_flags & JBD2_ABORT) {
@@ -2783,6 +2842,8 @@ void jbd2_journal_abort(journal_t *journal, int errno)
 	/*
 	 * Mark the abort as occurred and start current running transaction
 	 * to release all journaled buffer.
+	 * 
+	 * 标记中止已发生并启动当前运行的事务以释放所有记录的缓冲区。
 	 */
 	pr_err("Aborting journal on device %s.\n", journal->j_devname);
 
@@ -2790,12 +2851,15 @@ void jbd2_journal_abort(journal_t *journal, int errno)
 	journal->j_errno = errno;
 	transaction = journal->j_running_transaction;
 	if (transaction)
+		// 唤醒等待<提交触发>的线程
 		__jbd2_log_start_commit(journal, transaction->t_tid);
 	write_unlock(&journal->j_state_lock);
 
 	/*
 	 * Record errno to the journal super block, so that fsck and jbd2
 	 * layer could realise that a filesystem check is needed.
+	 * 
+	 * 将errno记录到日志超级块中，以便fsck和jbd2层可以意识到需要进行文件系统检查。
 	 */
 	jbd2_journal_update_sb_errno(journal);
 	mutex_unlock(&journal->j_abort_mutex);
@@ -2811,15 +2875,22 @@ void jbd2_journal_abort(journal_t *journal, int errno)
  *
  * If the journal has been aborted on this mount time -EROFS will
  * be returned.
+ * 
+ * 返回日志的错误状态。
+ * 
+ * 这是使用jbd2_journal_abort（）设置的errno号，日志最后一次挂载的时间
+ * -如果日志在没有调用abort的情况下停止，这将是0。
+ * 
+ * 如果日志在此挂载时间中已中止，则返回-EROFS。
  */
 int jbd2_journal_errno(journal_t *journal)
 {
 	int err;
 
 	read_lock(&journal->j_state_lock);
-	if (journal->j_flags & JBD2_ABORT)
+	if (journal->j_flags & JBD2_ABORT)	// journal在此挂载时间中已中止
 		err = -EROFS;
-	else
+	else	// journal未中止，返回jbd2_journal_abort设置的journal->j_errno
 		err = journal->j_errno;
 	read_unlock(&journal->j_state_lock);
 	return err;
@@ -2831,6 +2902,8 @@ int jbd2_journal_errno(journal_t *journal)
  *
  * An error must be cleared or acked to take a FS out of readonly
  * mode.
+ * 
+ * 清除日志的错误状态：必须清除或确认错误才能使FS退出只读模式。
  */
 int jbd2_journal_clear_err(journal_t *journal)
 {
@@ -2851,6 +2924,8 @@ int jbd2_journal_clear_err(journal_t *journal)
  *
  * An error must be cleared or acked to take a FS out of readonly
  * mode.
+ * 
+ * 确认日志错误：必须清除或确认错误才能使FS退出只读模式。
  */
 void jbd2_journal_ack_err(journal_t *journal)
 {
@@ -2900,6 +2975,14 @@ size_t journal_tag_bytes(journal_t *journal)
  * this reason we don't need to a mutex to protect access to
  * jbd2_slab[] allocating or releasing memory; only in
  * jbd2_journal_create_slab().
+ * 
+ * JBD内存管理：这些函数用于分配块大小的内存块，用于复制buffer_head数据。
+ * 
+ * 很多时候，它将是页面大小的数据块，但有时它将是子页面大小的数据块。（例如，Power系统上的
+ * 16k页面与4k块文件系统。）对于小于页面的块，我们使用SLAB分配器。对于每个块大小，都有一个
+ * SLAB高速缓存，如果需要，可以在挂载时分配，只有在卸载jbd2模块时才释放（所有）SLAB高速缓存。
+ * 因此，我们不需要互斥锁来保护对jbd2_slab []分配或释放内存的访问; 仅在
+ * jbd2_journal_create_slab（）中。
  */
 #define JBD2_MAX_SLABS 8
 static struct kmem_cache *jbd2_slab[JBD2_MAX_SLABS];

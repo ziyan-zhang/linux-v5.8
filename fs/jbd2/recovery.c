@@ -123,6 +123,7 @@ failed:
 
 /*
  * Read a block from the journal
+ * 从日志中读一个块
  */
 
 static int jread(struct buffer_head **bhp, journal_t *journal,
@@ -226,7 +227,9 @@ static int count_tags(journal_t *journal, struct buffer_head *bh)
 }
 
 
-/* Make sure we wrap around the log correctly! */
+/* Make sure we wrap around the log correctly! 
+ * 确保我们正确地环绕日志 TODO: what the f**k is wrap?
+ */
 #define wrap(journal, var)						\
 do {									\
 	unsigned long _wrap_last =					\
@@ -350,6 +353,14 @@ int jbd2_journal_recover(journal_t *journal)
  * We perform one pass over the journal to allow us to tell the user how
  * much recovery information is being erased, and to let us initialise
  * the journal transaction sequence numbers to the next unused ID.
+ * 
+ * 开始日志并擦除现有记录
+ * 
+ * 定位日志中的任何有效恢复信息，并设置内存中的日志结构以忽略它（假设调用者有证据表明它已过时）。
+ * 此函数似乎没有被导出。
+ * 
+ * 我们对日志执行一次通行，以便让我们告诉用户正在擦除多少恢复信息，
+ * 并让我们初始化日志事务序列号以使用下一个未使用的ID。
  */
 int jbd2_journal_skip_recovery(journal_t *journal)
 {
@@ -480,6 +491,9 @@ static int do_one_pass(journal_t *journal,
 	 * First thing is to establish what we expect to find in the log
 	 * (in terms of transaction IDs), and where (in terms of log
 	 * block offsets): query the superblock.
+	 * 
+	 * 首先是确定我们期望在日志中找到什么（以事务ID的形式）
+	 * 以及在哪里找（以日志块偏移量的形式）：查询超级块。
 	 */
 
 	sb = journal->j_superblock;
@@ -497,6 +511,9 @@ static int do_one_pass(journal_t *journal,
 	 * making sure that each transaction has a commit block in the
 	 * expected place.  Each complete transaction gets replayed back
 	 * into the main filesystem.
+	 * 
+	 * 现在，我们逐个事务地遍历日志，确保每个事务在预期位置上都有一个提交块。
+	 * 每个完整的事务都会被重放回主文件系统。
 	 */
 
 	while (1) {
@@ -510,7 +527,10 @@ static int do_one_pass(journal_t *journal,
 
 		/* If we already know where to stop the log traversal,
 		 * check right now that we haven't gone past the end of
-		 * the log. */
+		 * the log.
+		 * 
+		 * 如果我们已经知道在哪里停止日志遍历，请立即检查我们是否已经超过了日志的末尾。
+		 */
 
 		if (pass != PASS_SCAN)
 			if (tid_geq(next_commit_ID, info->end_transaction))
@@ -523,7 +543,10 @@ static int do_one_pass(journal_t *journal,
 
 		/* Skip over each chunk of the transaction looking
 		 * either the next descriptor block or the final commit
-		 * record. */
+		 * record. 
+		 * 
+		 * 跳过事务的每个块，查找下一个描述符块或最终提交记录。
+		 * */
 
 		jbd2_debug(3, "JBD2: checking block %ld\n", next_log_block);
 		err = jread(&bh, journal, next_log_block);
@@ -589,7 +612,12 @@ static int do_one_pass(journal_t *journal,
 			/* If it is a valid descriptor block, replay it
 			 * in pass REPLAY; if journal_checksums enabled, then
 			 * calculate checksums in PASS_SCAN, otherwise,
-			 * just skip over the blocks it describes. */
+			 * just skip over the blocks it describes. 
+			 * 
+			 * 如果它是一个有效的描述符块，在PASS_REPLAY中重放它；
+			 * 如果启用了journal_checksums，则在PASS_SCAN中计算校验和，
+			 * 否则，只需跳过它描述的块。
+			 * */
 			if (pass != PASS_REPLAY) {
 				if (pass == PASS_SCAN &&
 				    jbd2_has_feature_checksum(journal) &&
@@ -612,7 +640,10 @@ static int do_one_pass(journal_t *journal,
 
 			/* A descriptor block: we can now write all of
 			 * the data blocks.  Yay, useful work is finally
-			 * getting done here! */
+			 * getting done here! 
+			 * 
+			 * 描述符块：我们现在可以写入所有数据块。耶，有用的工作终于在这里完成了！
+			 * */
 
 			tagp = &bh->b_data[sizeof(journal_header_t)];
 			while ((tagp - bh->b_data + tag_bytes)

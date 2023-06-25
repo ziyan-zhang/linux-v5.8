@@ -197,6 +197,11 @@ __flush_batch(journal_t *journal, int *batch_count)
  *
  * The journal should be locked before calling this function.
  * Called with j_checkpoint_mutex held.
+ * 
+ * 执行一个实际的checkpoint。我们获取要被ckeckpointed的事务列表中的第一个事务，
+ * 将其所有的缓冲区发送到磁盘。我们一次提交更大的数据块。
+ * 
+ * 在调用此函数之前，应该锁定日志。在持有j_checkpoint_mutex的情况下调用。
  */
 int jbd2_log_do_checkpoint(journal_t *journal)
 {

@@ -347,6 +347,8 @@ static void jbd2_block_tag_csum_set(journal_t *j, journal_block_tag_t *tag,
  *
  * The primary function for committing a transaction to the log.  This
  * function is called by the journal thread to begin a complete commit.
+ * 
+ * 将事务提交到log的主要函数。这个函数被journal线程调用来开始一个完整的提交。
  */
 void jbd2_journal_commit_transaction(journal_t *journal)
 {
