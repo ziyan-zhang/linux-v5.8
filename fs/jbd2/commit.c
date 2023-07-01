@@ -28,6 +28,7 @@
 
 /*
  * IO end handler for temporary buffer_heads handling writes to the journal.
+ * 临时buffer_heads的IO结束句柄，用于处理对journal的写入。
  */
 static void journal_end_buffer_io_sync(struct buffer_head *bh, int uptodate)
 {
@@ -39,9 +40,9 @@ static void journal_end_buffer_io_sync(struct buffer_head *bh, int uptodate)
 	else
 		clear_buffer_uptodate(bh);
 	if (orig_bh) {
-		clear_bit_unlock(BH_Shadow, &orig_bh->b_state);
-		smp_mb__after_atomic();
-		wake_up_bit(&orig_bh->b_state, BH_Shadow);
+		clear_bit_unlock(BH_Shadow, &orig_bh->b_state);	//清除BH_Shadow位
+		smp_mb__after_atomic();	// 原子操作后的内存屏障
+		wake_up_bit(&orig_bh->b_state, BH_Shadow);	// 唤醒BH_Shadow位
 	}
 	unlock_buffer(bh);
 }
@@ -53,12 +54,20 @@ static void journal_end_buffer_io_sync(struct buffer_head *bh, int uptodate)
  * ->mapping, and with attached buffers.  These pages are trivially reclaimable
  * by the VM, but their apparent absence upsets the VM accounting, and it makes
  * the numbers in /proc/meminfo look odd.
+ * 
+ * 当截断ext4文件时，可能会有一些页面没有成功释放，因为它们附加到提交事务。
+ * 事务提交后，这些页面将保留在LRU上，没有->mapping，并附加缓冲区。
+ * VM可以轻松回收这些页面，但它们的缺失会使VM计数出错，并且会使/proc/meminfo中的数字看起来奇怪。
  *
  * So here, we have a buffer which has just come off the forget list.  Look to
  * see if we can strip all buffers from the backing page.
  *
  * Called under lock_journal(), and possibly under journal_datalist_lock.  The
  * caller provided us with a ref against the buffer, and we drop that here.
+ * 
+ * 因此，在这里，我们有一个刚刚从忘记列表中删除的缓冲区。查看是否可以从后备页面中删除所有缓冲区。
+ * 在lock_journal()下调用，可能在journal_datalist_lock下调用。
+ * 调用者为我们提供了对缓冲区的引用，我们在这里放弃了它。
  */
 static void release_buffer_page(struct buffer_head *bh)
 {
@@ -87,6 +96,7 @@ nope:
 	__brelse(bh);
 }
 
+// 根据bh内容，设置csum
 static void jbd2_commit_block_csum_set(journal_t *j, struct buffer_head *bh)
 {
 	struct commit_header *h;
@@ -108,6 +118,9 @@ static void jbd2_commit_block_csum_set(journal_t *j, struct buffer_head *bh)
  * cleaned up our previous buffers by now, so if we are in abort
  * mode we can now just skip the rest of the journal write
  * entirely.
+ * 
+ * 完成所有操作：现在提交 commit record。我们现在应该清理了以前的缓冲区，因此如果我们处于中止模式，
+ * 则现在可以完全跳过日志写入的其余部分。
  *
  * Returns 1 if the journal needs to be aborted or 0 on success
  */
@@ -147,7 +160,7 @@ static int journal_submit_commit_record(journal_t *journal,
 	lock_buffer(bh);
 	clear_buffer_dirty(bh);
 	set_buffer_uptodate(bh);
-	bh->b_end_io = journal_end_buffer_io_sync;
+	bh->b_end_io = journal_end_buffer_io_sync;	// 临时buffer_heads的IO结束句柄
 
 	if (journal->j_flags & JBD2_BARRIER &&
 	    !jbd2_has_feature_async_commit(journal))
@@ -184,6 +197,8 @@ int jbd2_submit_inode_data(journal_t *journal, struct jbd2_inode *jinode)
 		return 0;
 
 	trace_jbd2_submit_inode_data(jinode->i_vfs_inode);
+	// j_submit_inode_data_buffers()会将jinode->i_dirty_buffers链表
+	// 中的所有buffer提交到磁盘
 	return journal->j_submit_inode_data_buffers(jinode);
 
 }
@@ -207,6 +222,11 @@ EXPORT_SYMBOL(jbd2_wait_inode_data);
  * We are in a committing transaction. Therefore no new inode can be added to
  * our inode list. We use JI_COMMIT_RUNNING flag to protect inode we currently
  * operate on from being released while we write out pages.
+ * 
+ * 提交与事务关联的inode的所有数据缓冲区到磁盘。
+ * 
+ * 我们处于提交事务中。因此，不能将新的inode添加到我们的inode列表中。
+ * 我们使用JI_COMMIT_RUNNING标志来保护我们当前操作的inode，以防止在我们写出页面时释放它。
  */
 static int journal_submit_data_buffers(journal_t *journal,
 		transaction_t *commit_transaction)

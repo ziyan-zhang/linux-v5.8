@@ -297,6 +297,10 @@ static inline struct page *encoded_page_ptr(struct encoded_page *page)
  * power-of-two.  It may be mapped into userspace at an address which is
  * at an arbitrary page offset, but its kernel virtual address is aligned
  * to its size.
+ * 
+ * folio是一组物理上、虚拟上和逻辑上连续的字节。它的大小是2的幂，并且它与该幂对齐。
+ * 它至少与%PAGE_SIZE一样大。如果它在页面缓存中，它的文件偏移量是该幂的倍数。
+ * 它可以映射到用户空间的地址是任意页面偏移量，但它的内核虚拟地址对齐到它的大小。
  */
 struct folio {
 	/* private: don't document the anon union */

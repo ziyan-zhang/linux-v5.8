@@ -515,6 +515,8 @@ repeat:
 /*
  * Allocation code for the journal file.  Manage the space left in the
  * journal, so that we can begin checkpointing when appropriate.
+ * 
+ * 日志文件的分配代码。管理日志中剩余的空间，以便在适当时开始检查点。
  */
 
 /*
@@ -527,19 +529,26 @@ repeat:
 static int __jbd2_log_start_commit(journal_t *journal, tid_t target)
 {
 	/* Return if the txn has already requested to be committed */
-	if (journal->j_commit_request == target)	// j_commit_request：最近请求提交的事务的tid
+	// j_commit_request：最近请求提交的事务的tid；target：目标事务的tid（序列号）
+	// 如果事务已经请求提交，则返回0：事情已经做了
+	if (journal->j_commit_request == target)
 		return 0;
 
 	/*
 	 * The only transaction we can possibly wait upon is the
 	 * currently running transaction (if it exists).  Otherwise,
 	 * the target tid must be an old one.
+	 * 
+	 * 我们唯一可能等待的事务是当前的running transaction（如果存在）。否则，目标tid肯定是旧的。
 	 */
 	if (journal->j_running_transaction &&
 	    journal->j_running_transaction->t_tid == target) {
 		/*
 		 * We want a new commit: OK, mark the request and wakeup the
 		 * commit thread.  We do _not_ do the commit ourselves.
+		 * 
+		 * 我们想要一个新的提交：好的，标记请求并唤醒提交线程。我们 不会 自己提交。
+		 * TODO: 不亲自提交，是说journal->j_wait_commit队列中的才是真正的提交任务吗
 		 */
 
 		journal->j_commit_request = target;
@@ -547,7 +556,8 @@ static int __jbd2_log_start_commit(journal_t *journal, tid_t target)
 			  journal->j_commit_request,
 			  journal->j_commit_sequence);
 		journal->j_running_transaction->t_requested = jiffies;
-		wake_up(&journal->j_wait_commit);	// 现在提交已触发，唤醒等待 触发提交 的等待队列
+		// 现在计时开始，提交开始了，唤醒等待在 触发提交这一事件 上的等待队列
+		wake_up(&journal->j_wait_commit);
 		return 1;
 	} else if (!tid_geq(journal->j_commit_request, target))
 		/* This should never happen, but if it does, preserve
@@ -3144,6 +3154,17 @@ static void journal_free_journal_head(struct journal_head *jh)
  *
  * When a buffer has its BH_JBD bit set it is immune from being released by
  * core kernel code, mainly via ->b_count.
+ * 
+ * 每当JBD对buffer有兴趣时，journal_head就会附加到buffer_head上。
+ * 
+ * 每当buffer有附加的journal_head时，它的->b_state:BH_JBD位就会被设置。
+ * 这个位在内核代码中被测试，我们需要在那里采取JBD特定的操作。
+ * 在那里测试->b_private是否为零是不可靠的。
+ * 
+ * 当buffer的BH_JBD位被设置时，它的->b_count会增加1。
+ * 
+ * 当buffer的BH_JBD位被设置时，它就不会被内核代码释放，主要是通过->b_count。
+ * 
  *
  * A journal_head is detached from its buffer_head when the journal_head's
  * b_jcount reaches zero. Running transaction (b_transaction) and checkpoint
@@ -3154,6 +3175,14 @@ static void journal_free_journal_head(struct journal_head *jh)
  * journal_head in this situation, jbd2_journal_add_journal_head elevates the
  * journal_head's b_jcount refcount by one.  The caller must call
  * jbd2_journal_put_journal_head() to undo this.
+ * 
+ * 当journal_head的b_jcount达到零时，它就会从buffer_head中分离出来。
+ * 运行事务（b_transaction）和检查点事务（b_cp_transaction）保留对b_jcount的引用。
+ * 
+ * 内核中的多个不同位置想要在将journal_head附加到事务之前将journal_head附加到buffer_head。
+ * 为了保护这种情况下的journal_head，jbd2_journal_add_journal_head将journal_head的
+ * b_jcount引用计数增加1。调用者必须调用jbd2_journal_put_journal_head()来撤消这个操作。
+ * 
  *
  * So the typical usage would be:
  *
@@ -3171,6 +3200,9 @@ static void journal_free_journal_head(struct journal_head *jh)
  * Give a buffer_head a journal_head.
  *
  * May sleep.
+ * 
+ * 给buffer_head一个journal_head
+ * 可能会睡眠
  */
 struct journal_head *jbd2_journal_add_journal_head(struct buffer_head *bh)
 {
@@ -3212,6 +3244,8 @@ repeat:
 /*
  * Grab a ref against this buffer_head's journal_head.  If it ended up not
  * having a journal_head, return NULL
+ * 
+ * 对这个buffer_head的journal_head进行引用。如果它最终没有journal_head，则返回NULL
  */
 struct journal_head *jbd2_journal_grab_journal_head(struct buffer_head *bh)
 {

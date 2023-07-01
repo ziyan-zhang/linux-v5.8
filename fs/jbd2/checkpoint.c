@@ -694,7 +694,7 @@ void jbd2_journal_destroy_checkpoint(journal_t *journal)
  * checkpoint lists.
  *
  * 直到提交到该事务中的所有缓冲区更新都已安全地存储在磁盘的其他位置之后，我们才能安全地
- * 清除日志中的事务。为了做到这点，事务中的所有缓冲区，都需要维护在事务的检查点列表中，
+ * 清除log中的事务。为了做到这点，事务中的所有缓冲区，都需要维护在事务的检查点列表中，
  * 直到它们被重写，此时该函数被调用，从现有事务的检查点列表中删除缓冲区。
  * 
  * The function returns 1 if it frees the transaction, 0 otherwise.
@@ -816,6 +816,8 @@ void __jbd2_journal_insert_checkpoint(struct journal_head *jh,
  * The transaction must have no links except for the checkpoint by this
  * point.
  * 
+ * journal从它维护的 等待checkpoint的transactions链表中 移除指定transaction
+ * 
  * 我们已经完成了这个事务结构：再见...
  * 在这个点，此事务必须没有除检查点之外的链接。
  *
@@ -833,6 +835,7 @@ void __jbd2_journal_drop_transaction(journal_t *journal, transaction_t *transact
 		transaction->t_cpprev->t_cpnext = transaction->t_cpnext;
 		// journal中的j_checkpoint_transactions指向函数参数中给的transaction，且该参数transaction是他自己
 		// 那就是全部checkpoint_transaction都完成了，所以j_checkpoint_transactions指向NULL
+		// hournal->j_checkpoint_transactions：所有等待checkpoint的事务的循环链表
 		if (journal->j_checkpoint_transactions == transaction)
 			journal->j_checkpoint_transactions =
 				transaction->t_cpnext;

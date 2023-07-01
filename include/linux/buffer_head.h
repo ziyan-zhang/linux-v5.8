@@ -64,6 +64,7 @@ typedef void (bh_end_io_t)(struct buffer_head *bh, int uptodate);
  */
 struct buffer_head {
 	unsigned long b_state;		/* buffer state bitmap (see above) */
+	// 页的缓冲的循环列表
 	struct buffer_head *b_this_page;/* circular list of page's buffers */
 	union {
 		struct page *b_page;	/* the page this bh is mapped to */
@@ -81,6 +82,7 @@ struct buffer_head {
 	struct address_space *b_assoc_map;	/* mapping this buffer is
 						   associated with */
 	atomic_t b_count;		/* users using this buffer_head */
+	// 由page中第一个buffer_head使用，用于序列化page中其他缓冲区的IO完成
 	spinlock_t b_uptodate_lock;	/* Used by the first bh in a page, to
 					 * serialise IO completion of other
 					 * buffers in the page */

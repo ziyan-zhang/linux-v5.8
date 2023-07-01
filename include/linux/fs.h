@@ -719,7 +719,7 @@ struct inode {
 #endif
 
 	void			*i_private; /* fs or device private pointer */
-} __randomize_layout;
+} __randomize_layout;	// 编译器宏，用于在编译时启用地址空间布局随机化
 
 struct timespec64 timestamp_truncate(struct timespec64 t, struct inode *inode);
 

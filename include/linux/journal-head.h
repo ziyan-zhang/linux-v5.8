@@ -22,17 +22,21 @@ struct buffer_head;
 struct journal_head {
 	/*
 	 * Points back to our buffer_head. [jbd_lock_bh_journal_head()]
+	 * 指回我们的buffer_head
 	 */
 	struct buffer_head *b_bh;
 
 	/*
 	 * Protect the buffer head state
+	 * 保护buffer head状态
 	 */
 	spinlock_t b_state_lock;
 
 	/*
 	 * Reference count - see description in journal.c
 	 * [jbd_lock_bh_journal_head()]
+	 * 
+	 * 引用计数-请参阅journal.c中的描述
 	 */
 	int b_jcount;
 
@@ -42,6 +46,8 @@ struct journal_head {
 	 * as gcc would then (which the C standard allows but which is
 	 * very unuseful) make 64-bit accesses to the bitfield and clobber
 	 * b_jcount if its update races with bitfield modification.
+	 * 
+	 * 此缓冲区的journalling列表(的buffer类型)[b_state_lock]
 	 */
 	unsigned b_jlist;
 
@@ -49,11 +55,16 @@ struct journal_head {
 	 * This flag signals the buffer has been modified by
 	 * the currently running transaction
 	 * [b_state_lock]
+	 * 
+	 * 此标志表示缓冲区已由当前running transaction修改
 	 */
 	unsigned b_modified;
 
 	/*
 	 * Copy of the buffer data frozen for writing to the log.
+	 * [b_state_lock]
+	 * 
+	 * 冻结的缓冲区数据的副本，用于写入日志
 	 * [b_state_lock]
 	 */
 	char *b_frozen_data;
@@ -62,6 +73,9 @@ struct journal_head {
 	 * Pointer to a saved copy of the buffer containing no uncommitted
 	 * deallocation references, so that allocations can avoid overwriting
 	 * uncommitted deletes. [b_state_lock]
+	 * 
+	 * 指向缓冲区保存的副本，该副本不包含未提交的 *取消分配引用（deallocation references）*，
+	 * 因此分配可以避免覆盖未提交的删除。
 	 */
 	char *b_committed_data;
 
@@ -85,13 +99,16 @@ struct journal_head {
 	 * committing it when the new transaction touched it.
 	 * [t_list_lock] [b_state_lock]
 	 * 
-	 * 指向当前正在修改缓冲区元数据的正在运行的复合事物的指针，如果新事物touch它时已经有一个事务提交它
+	 * 指向当前正在修改缓冲区元数据的running复合事物的指针，
+	 * 如果新事物touch它时已经有一个事务提交它
 	 */
 	transaction_t *b_next_transaction;
 
 	/*
 	 * Doubly-linked list of buffers on a transaction's data, metadata or
 	 * forget queue. [t_list_lock] [b_state_lock]
+	 * 
+	 * 事务数据，元数据或忘记队列上的缓冲区的双向链表
 	 */
 	struct journal_head *b_tnext, *b_tprev;
 
@@ -100,7 +117,7 @@ struct journal_head {
 	 * is checkpointed.  Only dirty buffers can be checkpointed.
 	 * [j_list_lock]
 	 * 
-	 * 指向为此缓冲区设置检查点的复合事务的指针。只有脏缓冲区才能被检查点
+	 * 指向为此缓冲区检查点的复合事务的指针。只有脏缓冲区才能被检查点
 	 */
 	transaction_t *b_cp_transaction;
 

@@ -418,7 +418,7 @@ static inline void jbd_unlock_bh_journal_head(struct buffer_head *bh)
  * struct jbd2_inode - The jbd_inode type is the structure linking inodes in
  * ordered mode present in a transaction so that we can sync them during commit.
  * 
- * jbd_inode 结构是事务中有序模式下链接iNode的结构。这样我们就可以在提交期间同步它们。
+ * jbd_inode 结构是事务中 ordered 模式下链接iNode的结构。这样我们就可以在提交期间同步它们。
  */
 struct jbd2_inode {
 	/**
@@ -510,9 +510,9 @@ struct jbd2_revoke_table_s;
 struct jbd2_journal_handle
 {
 	union {
-		transaction_t	*h_transaction;
+		transaction_t	*h_transaction;	// 此更新是哪个复合事务的一部分？
 		/* Which journal handle belongs to - used iff h_reserved set */
-		journal_t	*h_journal;
+		journal_t	*h_journal;	// 属于哪个日志句柄
 	};
 
 	handle_t		*h_rsv_handle;
@@ -587,7 +587,8 @@ struct transaction_chp_stats_s {
 
 struct transaction_s
 {
-	/* Pointer to the journal for this transaction. [no locking] */
+	/* Pointer to the journal for this transaction. [no locking] 
+	* 指向该事务journal的指针 */
 	journal_t		*t_journal;
 
 	/* Sequence number for this transaction [no locking] */
@@ -622,6 +623,8 @@ struct transaction_s
 	/*
 	 * Number of buffers on the t_buffers list [j_list_lock, no locks
 	 * needed for jbd2 thread]
+	 * 
+	 * t_buffers列表上的缓冲区数
 	 */
 	int			t_nr_buffers;
 
@@ -629,6 +632,8 @@ struct transaction_s
 	 * Doubly-linked circular list of all buffers reserved but not yet
 	 * modified by this transaction [j_list_lock, no locks needed fo
 	 * jbd2 thread]
+	 * 
+	 * 所有保留但尚未被此事务修改的缓冲区的双向循环链表
 	 */
 	struct journal_head	*t_reserved_list;
 	// todo: 这是怎么得来的？
@@ -636,6 +641,8 @@ struct transaction_s
 	/*
 	 * Doubly-linked circular list of all metadata buffers owned by this
 	 * transaction [j_list_lock, no locks needed for jbd2 thread]
+	 * 
+	 * 此事务拥有的所有元数据缓冲区的双向循环链表
 	 */
 	struct journal_head	*t_buffers;
 
@@ -671,7 +678,8 @@ struct transaction_s
 	 * one at all times. [j_list_lock, no locks needed for jbd2
 	 * thread]
 	 * 
-	 * 被日志IO阴影的元数据缓冲区的双向循环链表。iobuf列表上的IO缓冲区和此列表上的影子缓冲区始终一一对应
+	 * 被log IO阴影的元数据缓冲区的双向循环链表。
+	 * iobuf列表上的IO缓冲区和此列表上的影子缓冲区始终一一对应
 	 */
 	struct journal_head	*t_shadow_list;
 
@@ -703,6 +711,8 @@ struct transaction_s
 
 	/*
 	 * When commit was requested [j_state_lock]
+	 *
+	 * 提交是何时请求的
 	 */
 	unsigned long		t_requested;
 
@@ -724,7 +734,7 @@ struct transaction_s
 	 * handles as well as all journal descriptor blocks needed for this
 	 * transaction. [none]
 	 * 
-	 * 在此日志中为该事务保留的块数。这包括在启动事务处理句柄时保留的所有信用额度以及
+	 * 在journal中为该事务保留的块数。这包括在启动事务处理句柄时保留的所有信用额度以及
 	 * 此事务所需的所有日志描述符块（就是在信用额度基础上加了额外的描述符块）
 	 */
 	atomic_t		t_outstanding_credits;
@@ -740,7 +750,6 @@ struct transaction_s
 	 * How many handles used this transaction? [none]
 	 */
 	atomic_t		t_handle_count;
-	// todo: 多个 handle 会用同一个 transaction 吗？怎样用的？
 
 	/*
 	 * Forward and backward links for the circular list of all transactions
@@ -766,7 +775,8 @@ struct transaction_s
 	/*
 	 * This transaction is being forced and some process is
 	 * waiting for it to finish.
-	 * 此事务被强制执行，某些进程正在等待它完成
+	 * 
+	 * 此事务正在被force，并且某些进程正在等待它完成
 	 */
 	unsigned int t_synchronous_commit:1;
 
@@ -875,11 +885,15 @@ struct journal_s
 	 *
 	 * Number of processes waiting to create a barrier lock [j_state_lock,
 	 * no lock for quick racy checks]
+	 * 
+	 * 等待创建屏障锁的进程数
 	 */
 	int			j_barrier_count;
 
 	/**
 	 * @j_barrier: The barrier lock itself.
+	 * 
+	 * 屏障锁本身
 	 */
 	struct mutex		j_barrier;
 
@@ -889,6 +903,8 @@ struct journal_s
 	 * Transactions: The current running transaction...
 	 * [j_state_lock, no lock for quick racy checks] [caller holding
 	 * open handle]
+	 * 
+	 * 事务：当前正在运行的事务
 	 */
 	transaction_t		*j_running_transaction;
 
@@ -897,6 +913,8 @@ struct journal_s
 	 *
 	 * the transaction we are pushing to disk
 	 * [j_state_lock] [caller holding open handle]
+	 * 
+	 * 我们正在推送到磁盘的事务
 	 */
 	transaction_t		*j_committing_transaction;
 
@@ -905,6 +923,8 @@ struct journal_s
 	 *
 	 * ... and a linked circular list of all transactions waiting for
 	 * checkpointing. [j_list_lock]
+	 * 
+	 * 所有等待检查点的事务的循环链表
 	 */
 	transaction_t		*j_checkpoint_transactions;
 
@@ -926,12 +946,14 @@ struct journal_s
 
 	/**
 	 * @j_wait_commit: Wait queue to trigger commit.
-	 * 等待 触发提交 的等待队列
+	 * 等待在 触发提交这一事件 上的等待队列
 	 */
 	wait_queue_head_t	j_wait_commit;
 
 	/**
 	 * @j_wait_updates: Wait queue to wait for updates to complete.
+	 * 
+	 * 等待更新完成的等待队列
 	 */
 	wait_queue_head_t	j_wait_updates;
 
@@ -1088,6 +1110,8 @@ struct journal_s
 	 * @j_blk_offset:
 	 *
 	 * Starting block offset into the device where we store the journal.
+	 * 
+	 * 存储日志的设备中的起始块偏移量。
 	 */
 	unsigned long long	j_blk_offset;
 
@@ -1118,6 +1142,8 @@ struct journal_s
 
 	/**
 	 * @j_list_lock: Protects the buffer lists and internal buffer state.
+	 * 
+	 * 保护缓冲区列表和内部缓冲区状态。
 	 */
 	spinlock_t		j_list_lock;
 
@@ -1126,6 +1152,8 @@ struct journal_s
 	 *
 	 * Optional inode where we store the journal.  If present, all
 	 * journal block numbers are mapped into this inode via bmap().
+	 * 
+	 * 可选的inode，用于存储日志。如果存在，则通过bmap（）将所有日志块号映射到此inode中。
 	 */
 	struct inode		*j_inode;
 
@@ -1142,7 +1170,7 @@ struct journal_s
 	 * @j_transaction_sequence:
 	 *
 	 * Sequence number of the next transaction to grant [j_state_lock]
-	 * 下一个要授予【j_state_lock】的事务的序列号
+	 * 下一个要准予的事务的序列号【j_state_lock保护】
 	 */
 	tid_t			j_transaction_sequence;
 
@@ -1151,7 +1179,7 @@ struct journal_s
 	 *
 	 * Sequence number of the most recently committed transaction
 	 * [j_state_lock, no lock for quick racy checks]
-	 * 最近提交的事务的序列号
+	 * 最近已提交的事务的序列号
 	 */
 	tid_t			j_commit_sequence;
 
@@ -1195,6 +1223,8 @@ struct journal_s
 	 * @j_revoke_records_per_block:
 	 *
 	 * Number of revoke records that fit in one descriptor block.
+	 * 
+	 * 一个描述符块中可容纳的撤销记录数
 	 */
 	int			j_revoke_records_per_block;
 
@@ -1293,6 +1323,8 @@ struct journal_s
 	 * @j_commit_callback:
 	 *
 	 * This function is called when a transaction is closed.
+	 * 
+	 * 当事务关闭时调用此函数
 	 */
 	void			(*j_commit_callback)(journal_t *,
 						     transaction_t *);
@@ -1304,7 +1336,9 @@ struct journal_s
 	 * committing transaction marked with JI_WRITE_DATA flag
 	 * before we start to write out the transaction to the journal.
 	 * 
-	 * 在我们开始将事务写出到日志之前，为与标记为JI_WRITE_DATA标志的提交事务相关联的所有inode调用此函数
+	 * 在我们开始将事务写出到日志之前，
+	 * 为与标记为JI_WRITE_DATA标志的提交事务相关联的所有inode调用此函数
+	 * 注：这个应该是各个具体文件系统自己定义，在journal初始化的时候给到jbd层
 	 */
 	int			(*j_submit_inode_data_buffers)
 					(struct jbd2_inode *);
@@ -1891,11 +1925,14 @@ static inline unsigned long jbd2_log_space_left(journal_t *journal)
  * Definitions which augment the buffer_head layer
  */
 
-/* journaling buffer types */
+/* journaling buffer types，journaling 缓冲区类型 */
 #define BJ_None		0	/* Not journaled */
 #define BJ_Metadata	1	/* Normal journaled metadata */
+// 被此事务取代的缓冲区↓
 #define BJ_Forget	2	/* Buffer superseded by this transaction */
+// 缓冲区内容被隐藏到log中↓
 #define BJ_Shadow	3	/* Buffer contents being shadowed to the log */
+// 缓冲区被保留以供journal访问↓
 #define BJ_Reserved	4	/* Buffer is reserved for access by journal */
 #define BJ_Types	5
 
