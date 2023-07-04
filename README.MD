@@ -55,7 +55,7 @@ qemu-system-x86_64 -s -S \
 dd if=/dev/zero of=ext4.img bs=1M count=256
 mkfs.ext4 ext4.img
 ```
-qemu启动`run_qemu.sh`：
+qemu启动`run_qemu.sh`（注意最后一行没有\结尾）：
 ```bash
 qemu-system-x86_64 \
 	-nographic -serial mon:stdio -smp 2 -m 2048 \
