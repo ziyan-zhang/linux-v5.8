@@ -62,7 +62,7 @@ qemu-system-x86_64 \
 	-kernel Linux_compiled/arch/x86_64/boot/bzImage \
 	-hda ~/lab/ubuntu.img \
 	-append "root=/dev/sda2 rw console=ttyS0" \
-	-hdb ~/lab/ext4.img \
+	-hdb ~/lab/swap_ext4.img
 ```
 挂载sdb`sudo mount /dev/sdb /mnt/scsimp/`，看一下`cat /proc/mounts`，发现末行多了个新挂载的文件系统：
 ```plain
