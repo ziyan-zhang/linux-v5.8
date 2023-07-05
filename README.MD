@@ -73,6 +73,10 @@ qemu-system-x86_64 \
 为了开机后不用每次挂载sdb，在```/etc/fstab/```里面加一行`：
 ```
 /dev/sdb   /mnt/scsimp ext4    defaults    0   0
+# 注意，下面的写法是无法识别的，因为~不被识别，可能初始化文件系统的时候并没有登录呢，不知道用户是谁
+/dev/sdb	~/sdb_dir	ext4	defaults	0	0
+# 正确的写法是全路径
+/dev/sdb	/home/zy/sdb_dir	ext4	defaults	0	0
 ```
 ## 2. 额外挂载NVMe模拟磁盘
 注意编译内核的时候设备选项里面，打开NVMe支持
