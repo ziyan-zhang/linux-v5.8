@@ -7,9 +7,9 @@
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
 # 详细教程和文件位置
-比较新的版本了，有近两年顶会用的这个版本，往里加注释，调试文件系统都用这个版本了。
+非常新的内核版本了，有近两年顶会用的4.几，但5.0好像很有标志性。往里加注释，调试文件系统都用这个版本了（目前又用z-journal那个4.几了）。
 
-调试文件系统详细版教程：
+调试文件系统详细版教程（现在这个更新了下，比较新，主要是也更详细）：
 https://www.yuque.com/zhangziyan-blrbj/lhidou/ltogdk1p90efgkki
 
 内核代码位置：`~/lab/linux-v5.8`
