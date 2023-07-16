@@ -94,7 +94,7 @@ qemu-system-x86_64 \
 	-append "root=/dev/sda2 rw console=ttyS0" \
     -hdb ~/lab/ext4.img \
     -device nvme,drive=nvme1,serial=deadbeaf,num_queues=8 \
-    -drive file=/home/zy/lab/disk.qcow,if=none,id=nvme1 -smp 4 \
+    -drive file=/home/zy/lab/disk.qcow,if=none,id=nvme1 \
 ```
 
 ### 对该NVMe磁盘分区
