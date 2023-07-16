@@ -137,6 +137,7 @@ sudo mkfs.f2fs -l nvmedisk /dev/nvme0n1p1
 ```
 /dev/nvme0n1p1	~/nvmemp	f2fs	defaults	0	0
 ```
+注意上面这个~可能启动的时候不认。以文首最新教程为准。
 
 Linux kernel
 ============
